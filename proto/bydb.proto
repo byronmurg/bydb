@@ -6,15 +6,17 @@ package bydb;
 
 service ByDb {
 	rpc Crud(Command) returns (Response) {}
+	rpc Hello(Greeting) returns (Greeting) {}
+}
+
+message Greeting {
+	string msg = 1;
 }
 
 message Response {
-	string id = 1;
+	string document = 1;
 }
 
 message Command {
-	string id = 1;
-	string part = 2;
-	string verb = 3;
-	string doc = 4;
+	string raw = 1;
 }

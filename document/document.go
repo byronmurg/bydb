@@ -1,4 +1,4 @@
-package main
+package document
 
 type Document struct {
 	Id string `json:"id"`

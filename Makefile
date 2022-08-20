@@ -1,10 +1,16 @@
 
 GOFILES=$(shell find . -name "*.go")
 
-main: main.go | $(GOFILES)
-	go build -o $@ $*
+all: server client
+	@echo building
+
+server: server.go $(GOFILES)
+	go build -o $@ $<
+
+client: client.go $(GOFILES)
+	go build -o $@ $<
 
 clean:
-	rm -f main
+	rm -f server client
 
-.PHONY: clean
+.PHONY: clean all

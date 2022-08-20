@@ -4,8 +4,16 @@ import (
 	"path/filepath"
 )
 
+var (
+	prefix = ""
+)
+
+func SetPrefix(s string) {
+	prefix = s
+}
+
 func RootPath() string {
-	return "example-store" //@TODO not this
+	return filepath.Join(prefix, "example-store") //@TODO not this
 }
 
 func MetaDbPath() string {

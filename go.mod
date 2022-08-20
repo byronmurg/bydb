@@ -5,8 +5,11 @@ go 1.19
 require (
 	github.com/blevesearch/bleve/v2 v2.3.3
 	github.com/boltdb/bolt v1.3.1
+	github.com/golang/protobuf v1.5.2
 	github.com/lni/dragonboat/v4 v4.0.0-20220809152834-6d5cf9dec622
 	github.com/lni/goutils v1.3.1-0.20220604063047-388d67b4dbc4
+	google.golang.org/grpc v1.38.0
+	google.golang.org/protobuf v1.26.0
 )
 
 require (
@@ -38,7 +41,6 @@ require (
 	github.com/getsentry/sentry-go v0.12.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551 // indirect
-	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v0.0.0-20180813153112-4030bb1f1f0c // indirect
 	github.com/google/uuid v1.3.0 // indirect
@@ -69,5 +71,6 @@ require (
 	golang.org/x/exp v0.0.0-20200513190911-00229845015e // indirect
 	golang.org/x/net v0.0.0-20211008194852-3b03d305991f // indirect
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
-	google.golang.org/protobuf v1.26.0 // indirect
+	golang.org/x/text v0.3.7 // indirect
+	google.golang.org/genproto v0.0.0-20210624195500-8bfb893ecb84 // indirect
 )

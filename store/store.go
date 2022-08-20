@@ -1,12 +1,15 @@
-package main
+package store
 
 import (
 	"os"
+	"log"
 	"path/filepath"
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/boltdb/bolt"
 	"encoding/json"
+
+	. "omanom.com/bydb/document"
 )
 
 type searchMatch struct {
@@ -57,23 +60,33 @@ func (p *partition) Add(doc *Document) error {
 	})
 }
 
-func (p *partition) Get(id string) (*Document, error) {
+func (p *partition) GetRaw(id string) ([]byte, error) {
 
-	ret := &Document{}
+	var raw []byte
 
-	vErr := p.block.View(func(tx *bolt.Tx) error {
+	err := p.block.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(p.name))
-
-		v := b.Get([]byte(id))
-
-		return json.Unmarshal(v, ret)
+		if b == nil { return nil }
+		raw = b.Get([]byte(id))
+		return nil
 	})
 
-	if vErr != nil {
-		return nil, vErr
+	return raw, err
+}
+
+func (p *partition) Get(id string) (*Document, error) {
+
+	doc := &Document{}
+
+	rawDoc, getErr := p.GetRaw(id)
+
+	if getErr != nil {
+		return nil, getErr
 	}
 
-	return ret, nil
+	jsErr := json.Unmarshal(rawDoc, doc)
+
+	return doc, jsErr
 }
 
 func (p *partition) Delete(id string) error {
@@ -107,6 +120,8 @@ func (p *partition) Search(searchStr string) (*searchResult, error) {
 
 	viewErr := p.block.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(p.name))
+		if b == nil { return nil }
+
 		for _, hit := range(blSearchResults.Hits) {
 			match := searchMatch{ Doc:&Document{} }
 
@@ -196,6 +211,7 @@ func (s *store) getPartition(part string) (*partition, error) {
 }
 
 func (s *store) Put(doc *Document) error {
+	log.Printf("store PUT part:%s id:%s", doc.Part, doc.Id)
 	part, err := s.getPartition(doc.Part)
 	if err != nil {
 		return err
@@ -213,6 +229,16 @@ func (s *store) Get(partStr string, id string) (*Document, error) {
 	defer part.Close()
 
 	return part.Get(id)
+}
+
+func (s *store) GetRaw(partStr string, id string) ([]byte, error) {
+	part, err := s.getPartition(partStr)
+	if err != nil {
+		return nil, err
+	}
+	defer part.Close()
+
+	return part.GetRaw(id)
 }
 
 func (s *store) Delete(partStr string, id string) error {
@@ -238,6 +264,9 @@ func (s *store) Search(partStr string, searchStr string) (*searchResult, error) 
 func (s *store) Purge() error {
 	return os.RemoveAll(s.basePath)
 }
+
+// Export as-is
+type Store = store
 
 func NewStore(basePath string) (*store) {
 	return &store{ basePath: basePath }

@@ -1,10 +1,12 @@
-package main
+package command
 
 import (
 	s "strings"
 	"regexp"
 	"errors"
 	"encoding/json"
+
+	. "omanom.com/bydb/document"
 )
 
 type CommandType uint64

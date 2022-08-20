@@ -1,19 +1,21 @@
 package main
 
 import (
-	"context"
+	//"context"
 	"flag"
 	"fmt"
 	"os"
-	"time"
-	"encoding/json"
+	//"time"
+	//"encoding/json"
 
 	"github.com/lni/dragonboat/v4"
 	"github.com/lni/dragonboat/v4/config"
 	"github.com/lni/dragonboat/v4/logger"
-	"github.com/lni/goutils/syncutil"
+	//"github.com/lni/goutils/syncutil"
 
 	"omanom.com/bydb/dir"
+	. "omanom.com/bydb/statemachine"
+	. "omanom.com/bydb/api"
 )
 
 // @TODO remove this
@@ -23,6 +25,12 @@ var (
 		"localhost:63001",
 		"localhost:63002",
 		"localhost:63003",
+	}
+
+	gaddresses = []string{
+		"localhost:64001",
+		"localhost:64002",
+		"localhost:64003",
 	}
 )
 
@@ -52,13 +60,9 @@ func main() {
 			initialMembers[uint64(idx+1)] = v
 		}
 	}
-	var nodeAddr string
-	if len(*addr) != 0 {
-		nodeAddr = *addr
-	} else {
-		nodeAddr = initialMembers[uint64(*replicaID)]
-	}
 
+	nodeAddr := initialMembers[uint64(*replicaID)]
+	grpcAddr := gaddresses[*replicaID-1]
 
 	
 	fmt.Printf("node address: %s\n", nodeAddr)
@@ -75,7 +79,10 @@ func main() {
 		CompactionOverhead: 5,
 	}
 
+	//@TODO this just picks me an unused path
+	dir.SetPrefix(fmt.Sprintf("test-run/node%d", *replicaID))
 	datadir := dir.RaftPath()
+	//datadir := dir.RaftPath()
 
 	nhc := config.NodeHostConfig{
 		WALDir:         datadir,
@@ -83,14 +90,22 @@ func main() {
 		RTTMillisecond: 200,
 		RaftAddress:    nodeAddr,
 	}
+
 	nh, err := dragonboat.NewNodeHost(nhc)
 	if err != nil {
 		panic(err)
 	}
+
 	if err := nh.StartOnDiskReplica(initialMembers, *join, NewByStateMachine, rc); err != nil {
-		fmt.Printf("failed to add cluster, %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to add cluster, %v\n", err)
 		os.Exit(1)
 	}
+
+	api := NewApi(nh)
+
+	api.Start(grpcAddr)
+
+	/*
 
 	raftStopper := syncutil.NewStopper()
 
@@ -119,8 +134,6 @@ func main() {
 						fmt.Fprintf(os.Stderr, "SyncPropose returned error %v\n", err)
 					}
 
-					break
-
 				case GET:
 					result, err := nh.SyncRead(ctx, 128, cmd.Id)
 					// @TODO not just put to std
@@ -141,4 +154,5 @@ func main() {
 		}
 	})
 	raftStopper.Wait()
+	*/
 }
