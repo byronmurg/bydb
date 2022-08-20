@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option go_package = "omanom.com/bydb/proto";
+
+package bydb;
+
+service ByDb {
+	rpc Crud(Command) returns (Response) {}
+}
+
+message Response {
+	string id = 1;
+}
+
+message Command {
+	string id = 1;
+	string part = 2;
+	string verb = 3;
+	string doc = 4;
+}

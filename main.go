@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 	"encoding/json"
 
@@ -13,6 +12,8 @@ import (
 	"github.com/lni/dragonboat/v4/config"
 	"github.com/lni/dragonboat/v4/logger"
 	"github.com/lni/goutils/syncutil"
+
+	"omanom.com/bydb/dir"
 )
 
 // @TODO remove this
@@ -74,8 +75,7 @@ func main() {
 		CompactionOverhead: 5,
 	}
 
-	// @TODO this is an example
-	datadir := filepath.Join("example-data", "helloworld-data", fmt.Sprintf("node%d", *replicaID))
+	datadir := dir.RaftPath()
 
 	nhc := config.NodeHostConfig{
 		WALDir:         datadir,
@@ -121,6 +121,14 @@ func main() {
 
 					break
 
+				case GET:
+					result, err := nh.SyncRead(ctx, 128, cmd.Id)
+					// @TODO not just put to std
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "SyncRead returned error %v\n", err)
+					} else {
+						fmt.Fprintf(os.Stdout, "result: %s\n", result)
+					}
 
 				default:
 					panic("not yet implemented")

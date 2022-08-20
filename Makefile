@@ -1,5 +1,10 @@
 
-FILES=(main.go command.go document.go statemachine.go store.go zipper.go)
+GOFILES=$(shell find . -name "*.go")
 
-main: *.go
+main: main.go | $(GOFILES)
 	go build -o $@ $*
+
+clean:
+	rm -f main
+
+.PHONY: clean

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/boltdb/bolt"
 	"encoding/json"
 )
@@ -132,11 +133,31 @@ func (p *partition) Search(searchStr string) (*searchResult, error) {
 	return &res, nil
 }
 
+func createDefaultMapping() *mapping.IndexMappingImpl {
+	mapping := bleve.NewIndexMapping()
+
+	indexFieldMapping := bleve.NewDocumentMapping()
+
+	storeOnlyFieldMapping := bleve.NewTextFieldMapping()
+	storeOnlyFieldMapping.Store = true
+	storeOnlyFieldMapping.Index = true
+	storeOnlyFieldMapping.IncludeInAll = false
+	storeOnlyFieldMapping.IncludeTermVectors = false
+
+	documentMapping := bleve.NewDocumentStaticMapping()
+	documentMapping.AddSubDocumentMapping("index", indexFieldMapping)
+	documentMapping.AddFieldMappingsAt("categories", storeOnlyFieldMapping)
+
+	mapping.DefaultMapping = documentMapping
+
+	return mapping
+}
+
 func openOrCreateBleve(partitionPath string) (bleve.Index, error) {
     _, err := os.Stat(partitionPath)
 
     if os.IsNotExist(err) {
-		mapping := bleve.NewIndexMapping()
+		mapping := createDefaultMapping()
 		return bleve.New(partitionPath, mapping)
     } else {
 		return bleve.Open(partitionPath)

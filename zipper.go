@@ -2,90 +2,146 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"archive/tar"
 	"compress/gzip"
-	"errors"
 	"io"
 	"os"
+	"strings"
 )
 
-func getPathFiles(basePath string) ([]string, error) {
-	var ret []string
-	err := filepath.Walk(basePath, func(path string, info fs.FileInfo, err error) error {
-		if err != nil { return err }
-		if info.IsDir() { return nil }
-		ret = append(ret, path)
+
+
+// Tar takes a source and variable writers and walks 'source' writing each file
+// found to the tar writer; the purpose for accepting multiple writers is to allow
+// for multiple outputs (for example a file, or md5 hash)
+func Tar(src string, writers ...io.Writer) error {
+
+	// ensure the src actually exists before trying to tar it
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("Unable to tar files - %v", err.Error())
+	}
+
+	mw := io.MultiWriter(writers...)
+
+	gzw := gzip.NewWriter(mw)
+	defer gzw.Close()
+
+	tw := tar.NewWriter(gzw)
+	defer tw.Close()
+
+	// walk path
+	return filepath.Walk(src, func(file string, fi os.FileInfo, err error) error {
+
+		// return on any error
+		if err != nil {
+			return err
+		}
+
+		// return on non-regular files (thanks to [kumo](https://medium.com/@komuw/just-like-you-did-fbdd7df829d3) for this suggested update)
+		if !fi.Mode().IsRegular() {
+			return nil
+		}
+
+		// create a new dir/file header
+		header, err := tar.FileInfoHeader(fi, fi.Name())
+		if err != nil {
+			return err
+		}
+
+		// update the name to correctly reflect the desired destination when untaring
+		header.Name = strings.TrimPrefix(strings.Replace(file, src, "", -1), string(filepath.Separator))
+
+		// write the header
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+
+		// open files for taring
+		f, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+
+		// copy file data into tar writer
+		if _, err := io.Copy(tw, f); err != nil {
+			return err
+		}
+
+		// manually close here after each file operation; defering would cause each file close
+		// to wait until all operations have completed.
+		f.Close()
+
 		return nil
 	})
-	return ret, err
 }
 
-func CreateTarball(tarballFilePath string, sourcePath string) error {
-	file, err := os.Create(tarballFilePath)
+
+
+
+// Untar takes a destination path and a reader; a tar reader loops over the tarfile
+// creating the file structure at 'dst' along the way, and writing any files
+func Untar(dst string, r io.Reader) error {
+
+	gzr, err := gzip.NewReader(r)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Could not create tarball file '%s', got error '%s'", tarballFilePath, err.Error()))
+		return err
 	}
-	defer file.Close()
+	defer gzr.Close()
 
-	return WriteTarballToFD(file, sourcePath)
-}
+	tr := tar.NewReader(gzr)
 
-func WriteTarballToFD(writer io.Writer, sourcePath string) error {
+	for {
+		header, err := tr.Next()
 
-	filePaths, locateError := getPathFiles(sourcePath)
-	if locateError != nil {
-		return locateError
-	}
-	
-	gzipWriter := gzip.NewWriter(writer)
-	defer gzipWriter.Close()
+		switch {
 
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
+		// if no more files are found return
+		case err == io.EOF:
+			return nil
 
-	for _, filePath := range filePaths {
-		err := addFileToTarWriter(filePath, tarWriter)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Could not add file '%s', to tarball, got error '%s'", filePath, err.Error()))
+		// return any other error
+		case err != nil:
+			return err
+
+		// if the header is nil, just skip it (not sure how this happens)
+		case header == nil:
+			continue
+		}
+
+		// the target location where the dir/file should be created
+		target := filepath.Join(dst, header.Name)
+
+		// the following switch could also be done using fi.Mode(), not sure if there
+		// a benefit of using one vs. the other.
+		// fi := header.FileInfo()
+
+		// check the file type
+		switch header.Typeflag {
+
+		// if its a dir and it doesn't exist create it
+		case tar.TypeDir:
+			if _, err := os.Stat(target); err != nil {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					return err
+				}
+			}
+
+		// if it's a file create it
+		case tar.TypeReg:
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+
+			// copy over contents
+			if _, err := io.Copy(f, tr); err != nil {
+				return err
+			}
+
+			// manually close here after each file operation; defering would cause each file close
+			// to wait until all operations have completed.
+			f.Close()
 		}
 	}
-
-	return nil
-}
-
-
-// Private methods
-
-func addFileToTarWriter(filePath string, tarWriter *tar.Writer) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Could not open file '%s', got error '%s'", filePath, err.Error()))
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return errors.New(fmt.Sprintf("Could not get stat for file '%s', got error '%s'", filePath, err.Error()))
-	}
-
-	header := &tar.Header{
-		Name:    filePath,
-		Size:    stat.Size(),
-		Mode:    int64(stat.Mode()),
-		ModTime: stat.ModTime(),
-	}
-
-	err = tarWriter.WriteHeader(header)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Could not write header for file '%s', got error '%s'", filePath, err.Error()))
-	}
-
-	_, err = io.Copy(tarWriter, file)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Could not copy the file '%s' data to the tarball, got error '%s'", filePath, err.Error()))
-	}
-
-	return nil
 }
