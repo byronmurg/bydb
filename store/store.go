@@ -53,7 +53,6 @@ func (p *partition) Add(doc *Document) error {
 			return err
 		}
 
-		// 
 		if err := p.index.Index(doc.Id, doc); err != nil {
 			return err
 		}

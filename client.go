@@ -21,7 +21,7 @@ var (
 )
 
 func callCrud(msg string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 10)
 	defer cancel()
 	r, err := client.Crud(ctx, &pb.Command{Raw: msg})
 	if err != nil {

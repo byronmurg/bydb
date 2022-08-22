@@ -75,14 +75,13 @@ func main() {
 		ElectionRTT:        10,
 		HeartbeatRTT:       1,
 		CheckQuorum:        true,
-		SnapshotEntries:    10, //<- @TODO this needs to be more in real life
-		CompactionOverhead: 5,
+		SnapshotEntries:    100, //<- @TODO this needs to be more in real life
+		CompactionOverhead: 20,
 	}
 
 	//@TODO this just picks me an unused path
 	dir.SetPrefix(fmt.Sprintf("test-run/node%d", *replicaID))
 	datadir := dir.RaftPath()
-	//datadir := dir.RaftPath()
 
 	nhc := config.NodeHostConfig{
 		WALDir:         datadir,
@@ -104,55 +103,4 @@ func main() {
 	api := NewApi(nh)
 
 	api.Start(grpcAddr)
-
-	/*
-
-	raftStopper := syncutil.NewStopper()
-
-	ch := make(chan Command)
-
-	raftStopper.RunWorker(func() {
-		cs := nh.GetNoOPSession(128) //<- @TODO made up shardid
-		for {
-			select {
-			case cmd, ok := <-ch:
-				if !ok {
-					return
-				}
-
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-
-				switch cmd.Type {
-				case PUT:
-				case POST:
-				case DEL:
-					jsCmd, jsErr := json.Marshal(cmd)
-					if jsErr != nil { panic(jsErr) }
-
-					_, err := nh.SyncPropose(ctx, cs, jsCmd)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "SyncPropose returned error %v\n", err)
-					}
-
-				case GET:
-					result, err := nh.SyncRead(ctx, 128, cmd.Id)
-					// @TODO not just put to std
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "SyncRead returned error %v\n", err)
-					} else {
-						fmt.Fprintf(os.Stdout, "result: %s\n", result)
-					}
-
-				default:
-					panic("not yet implemented")
-				}
-
-				cancel()
-			case <-raftStopper.ShouldStop():
-				return
-			}
-		}
-	})
-	raftStopper.Wait()
-	*/
 }

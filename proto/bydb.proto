@@ -16,6 +16,7 @@ message Greeting {
 message Response {
 	int64 code = 1;
 	string document = 2;
+	int64 duration = 3;
 }
 
 message Command {

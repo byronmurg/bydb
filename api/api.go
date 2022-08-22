@@ -2,6 +2,7 @@ package api
 
 import (
 	"net"
+	"time"
 	"context"
 	"github.com/lni/dragonboat/v4"
 	"google.golang.org/grpc"
@@ -30,6 +31,8 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 
 	response := pb.Response{}
 
+	start := time.Now()
+
 	cmd, err := command.ParseCommand(gCmd.Raw)
 	if err != nil {
 		response.Code = 400
@@ -47,6 +50,7 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 			return nil, err
 		}
 
+		response.Code = 200
 		response.Document = "ok"
 
 	case command.GET:
@@ -57,8 +61,8 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 		}
 
 		res := result.(Response)
-		response.Document = res.Body
 		response.Code = res.Code
+		response.Document = res.Body
 
 	case command.SEARCH:
 		s.logger.Debugf("crud is search")
@@ -68,13 +72,16 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 		}
 
 		res := result.(Response)
-		response.Document = res.Body
 		response.Code = res.Code
+		response.Document = res.Body
 
 	default:
-		response.Document = "unknown command"
 		response.Code = 405
+		response.Document = "unknown command"
 	}
+
+	duration := time.Now().Sub(start)
+	response.Duration = int64(duration)
 
 	return &response, nil
 }
