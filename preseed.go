@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"flag"
-	"os"
 	"log"
 	"time"
-	s "strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -51,34 +48,8 @@ func main() {
 
 
 
-	cli := bufio.NewReader(os.Stdin)
-
-	for {
-		fmt.Printf("$ ")
-
-		rawStr, err := cli.ReadString('\n')
-		str := s.TrimSpace(rawStr)
-
-		if err != nil {
-			fmt.Print(err)
-			break
-		}
-
-		if str == "exit" || str == "EXIT" {
-			break
-		}
-
-		if str == "" {
-			continue
-		}
-
-		callCrud(str)
-	}
-
-	/*
 	callCrud("GET omanom 1234")
 	callCrud(`PUT { "part":"omanom", "id":"1234", "index":{ "foo":"bar" }, "block": { "hide":"me" }, "categories": ["active=true"] }`)
 	callCrud(`SEARCH omanom "bar"`)
 	callCrud(`SEAR omanom "bar"`) //invalid
-	*/
 }

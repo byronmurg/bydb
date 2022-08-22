@@ -2,10 +2,11 @@ package store
 
 import (
 	"os"
-	"log"
+	"omanom.com/bydb/logger"
 	"path/filepath"
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
+	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
 	"github.com/boltdb/bolt"
 	"encoding/json"
 
@@ -26,6 +27,7 @@ type partition struct {
 	index bleve.Index
 	block *bolt.DB
 	name string
+	logger *logger.Logger
 }
 
 func (p *partition) Close() {
@@ -52,7 +54,7 @@ func (p *partition) Add(doc *Document) error {
 		}
 
 		// 
-		if err := p.index.Index(doc.Id, doc.Index); err != nil {
+		if err := p.index.Index(doc.Id, doc); err != nil {
 			return err
 		}
 		
@@ -62,12 +64,23 @@ func (p *partition) Add(doc *Document) error {
 
 func (p *partition) GetRaw(id string) ([]byte, error) {
 
+	// Bolt returns internal bytes so we need a buffer
+	// to copy results into
 	var raw []byte
 
+	// Start a bolt read transaction
 	err := p.block.View(func(tx *bolt.Tx) error {
+		// Get the bucket, if nil is returned then
+		// the bucket doesn't exist so just return
 		b := tx.Bucket([]byte(p.name))
 		if b == nil { return nil }
-		raw = b.Get([]byte(id))
+
+		// Get the raw bytes and copy them into the
+		// return buffer
+		doc := b.Get([]byte(id))
+		raw = make([]byte, len(doc))
+		copy(raw, doc)
+
 		return nil
 	})
 
@@ -75,6 +88,8 @@ func (p *partition) GetRaw(id string) ([]byte, error) {
 }
 
 func (p *partition) Get(id string) (*Document, error) {
+	// This method just calls GetRaw and unmarshals the
+	// result into a Document structure
 
 	doc := &Document{}
 
@@ -95,10 +110,15 @@ func (p *partition) Delete(id string) error {
 		b, bucketErr := tx.CreateBucketIfNotExists([]byte(p.name))
 		if bucketErr != nil { return bucketErr }
 
+		// Delete from bolt. This won't be commited until
+		// the end of this function
 		if err := b.Delete([]byte(id)); err != nil {
 			return err
 		}
 
+		// Delete from the index. If this fails then
+		// returning an error will cancel the bolt
+		// transaction also.
 		if err := p.index.Delete(id); err != nil {
 			return err
 		}
@@ -108,7 +128,9 @@ func (p *partition) Delete(id string) error {
 }
 
 func (p *partition) Search(searchStr string) (*searchResult, error) {
-	query := bleve.NewMatchQuery(searchStr)
+	p.logger.Debugf(`search in part %s with match (%s)`, p.name, searchStr)
+
+	query := bleve.NewQueryStringQuery(searchStr)
 
 	search := bleve.NewSearchRequest(query)
 	blSearchResults, err := p.index.Search(search)
@@ -154,6 +176,7 @@ func createDefaultMapping() *mapping.IndexMappingImpl {
 	indexFieldMapping := bleve.NewDocumentMapping()
 
 	storeOnlyFieldMapping := bleve.NewTextFieldMapping()
+	storeOnlyFieldMapping.Analyzer = keyword.Name
 	storeOnlyFieldMapping.Store = true
 	storeOnlyFieldMapping.Index = true
 	storeOnlyFieldMapping.IncludeInAll = false
@@ -179,7 +202,7 @@ func openOrCreateBleve(partitionPath string) (bleve.Index, error) {
 	}
 }
 
-func OpenPartition(name string, partitionPath string) (*partition, error) {
+func OpenPartition(name string, partitionPath string, logger *logger.Logger) (*partition, error) {
 	index, blErr := openOrCreateBleve(partitionPath)
 	if blErr != nil { return nil, blErr }
 
@@ -194,6 +217,7 @@ func OpenPartition(name string, partitionPath string) (*partition, error) {
 		index: index,
 		block: block,
 		name: name,
+		logger: logger,
 	}
 
 	return &part, nil
@@ -203,15 +227,16 @@ func OpenPartition(name string, partitionPath string) (*partition, error) {
 
 type store struct {
 	basePath string
+	logger *logger.Logger
 }
 
 func (s *store) getPartition(part string) (*partition, error) {
 	blevePath := filepath.Join(s.basePath, "part", part)
-	return OpenPartition(part, blevePath)
+	return OpenPartition(part, blevePath, s.logger)
 }
 
 func (s *store) Put(doc *Document) error {
-	log.Printf("store PUT part:%s id:%s", doc.Part, doc.Id)
+	s.logger.Debugf("store PUT part:%s id:%s", doc.Part, doc.Id)
 	part, err := s.getPartition(doc.Part)
 	if err != nil {
 		return err
@@ -269,5 +294,8 @@ func (s *store) Purge() error {
 type Store = store
 
 func NewStore(basePath string) (*store) {
-	return &store{ basePath: basePath }
+	return &store{
+		basePath: basePath,
+		logger: logger.New("store"),
+	}
 }

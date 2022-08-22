@@ -1,7 +1,7 @@
 
 GOFILES=$(shell find . -name "*.go")
 
-all: server client
+all: server client preseed
 	@echo building
 
 server: server.go $(GOFILES)
@@ -10,7 +10,10 @@ server: server.go $(GOFILES)
 client: client.go $(GOFILES)
 	go build -o $@ $<
 
+preseed: preseed.go $(GOFILES)
+	go build -o $@ $<
+
 clean:
-	rm -f server client
+	rm -f server client preseed
 
 .PHONY: clean all

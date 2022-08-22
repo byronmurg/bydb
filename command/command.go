@@ -36,11 +36,14 @@ type Command struct {
 	Query string
 	Id string
 	Part string
+	Raw string
 }
 
 func ParseCommand(rawMsg string) (*Command, error) {
 	msg := s.TrimSpace(rawMsg)
-	cmd := Command{}
+	cmd := Command{
+		Raw: rawMsg,
+	}
 
 	if getRegex.MatchString(msg) {
 		parts := getRegex.FindStringSubmatch(msg)
