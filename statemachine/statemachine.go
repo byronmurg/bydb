@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"encoding/json"
 	"os"
+	"sync"
 
 	sm "github.com/lni/dragonboat/v4/statemachine"
 	"github.com/boltdb/bolt"
@@ -22,6 +23,8 @@ type ByStateMachine struct {
 	metaDb *bolt.DB
 	lastIndex uint64
 	logger *logger.Logger
+	entries []sm.Entry
+	entryMutex sync.Mutex
 }
 
 func NewByStateMachine(uint64, uint64) sm.IOnDiskStateMachine {
@@ -101,35 +104,13 @@ func (s *ByStateMachine) updateLastUpdateIndex() error {
 
 func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 	s.logger.Debug("in Update")
-	var appliedIndex uint64 = 0
 
-	if s.metaDb == nil { panic("metadb is closed") }
+	s.entryMutex.Lock()
+	defer s.entryMutex.Unlock()
 
-	for i, entry := range updates {
-		s.logger.Debugf("Update recieved %s", entry.Cmd)
-		cmd, jsErr := command.ParseCommand(string(entry.Cmd))
-		if jsErr != nil { panic(jsErr) }
+	s.entries = append(s.entries, updates...)
 
-		switch cmd.Type {
-		case command.PUT, command.POST:
-			err := s.store.Put(&cmd.Doc)
-			if err != nil { return updates, err }
-
-		case command.DEL:
-			err := s.store.Delete(cmd.Part, cmd.Id)
-			if err != nil { return updates, err }
-
-		default:
-			panic("unknown command in Update")
-		}
-
-		updates[i].Result = sm.Result{ Value: uint64(len(updates[i].Cmd)) }
-		appliedIndex = entry.Index
-	}
-
-	s.lastIndex = appliedIndex
-
-	return updates, s.updateLastUpdateIndex()
+	return updates, nil
 }
 
 func (s *ByStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
@@ -190,7 +171,39 @@ func (s *ByStateMachine) SaveSnapshot(key any, writer io.Writer, done <-chan str
 }
 
 func (s *ByStateMachine) Sync() error {
-	return nil
+	s.logger.Debug("in sync")
+
+	var appliedIndex uint64 = 0
+	if s.metaDb == nil { panic("metadb is closed") }
+
+	s.entryMutex.Lock()
+	defer s.entryMutex.Unlock()
+
+	for _, entry := range s.entries {
+		s.logger.Debugf("Update recieved %s", entry.Cmd)
+		cmd, jsErr := command.ParseCommand(string(entry.Cmd))
+		if jsErr != nil { panic(jsErr) }
+
+		switch cmd.Type {
+		case command.PUT, command.POST:
+			err := s.store.Put(&cmd.Doc)
+			if err != nil { return err }
+
+		case command.DEL:
+			err := s.store.Delete(cmd.Part, cmd.Id)
+			if err != nil { return err }
+
+		default:
+			panic("unknown command in sync")
+		}
+
+		appliedIndex = entry.Index
+	}
+
+	s.lastIndex = appliedIndex
+	s.entries = []sm.Entry{}
+
+	return s.updateLastUpdateIndex()
 }
 
 func (s *ByStateMachine) Close() error {
