@@ -62,12 +62,13 @@ func loadWords() ([]string, error) {
 func worker(partitions []string, client pb.ByDbClient, wordChan <-chan string, done chan<- bool) {
 	for word := range wordChan {
 		for _, part := range partitions {
-			//cmd := fmt.Sprintf(`PUT { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ] }`, word, part, word, part, word)
-			cmd := fmt.Sprintf(`GET %s %s`, part, word)
+			cmd := fmt.Sprintf(`PUT { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ] }`, word, part, word, part, word)
+			//cmd := fmt.Sprintf(`GET %s %s`, part, word)
 			res := callCrud(client, cmd)
 			if res.Code != 200 {
-				log.Fatalf("recieved code: %d msg: %s", res.Code, res.Document)
+				log.Fatalf("recieved code: %d msg: %s cmd: %s", res.Code, res.Document, cmd)
 			}
+
 			if res.Duration < minDuration {
 				minDuration = res.Duration
 			}
