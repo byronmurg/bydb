@@ -98,6 +98,10 @@ func (p *partition) Get(id string) (*Document, error) {
 		return nil, getErr
 	}
 
+	if len(rawDoc) == 0 {
+		return nil, nil
+	}
+
 	jsErr := json.Unmarshal(rawDoc, doc)
 
 	return doc, jsErr
@@ -202,7 +206,8 @@ func openOrCreateBleve(partitionPath string) (bleve.Index, error) {
 }
 
 func OpenPartition(name string, partitionPath string, logger *logger.Logger) (*partition, error) {
-	index, blErr := openOrCreateBleve(partitionPath)
+	blevePath := filepath.Join(partitionPath, "index")
+	index, blErr := openOrCreateBleve(blevePath)
 	if blErr != nil { return nil, blErr }
 
 
@@ -293,6 +298,11 @@ func (s *store) Purge() error {
 type Store = store
 
 func NewStore(basePath string) (*store) {
+
+	partPath := filepath.Join(basePath, "part")
+	err := os.MkdirAll(partPath, os.ModePerm)
+	if err != nil { panic(err) }
+
 	return &store{
 		basePath: basePath,
 		logger: logger.New("store"),

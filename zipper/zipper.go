@@ -38,11 +38,6 @@ func Tar(src string, writers ...io.Writer) error {
 			return err
 		}
 
-		// return on non-regular files (thanks to [kumo](https://medium.com/@komuw/just-like-you-did-fbdd7df829d3) for this suggested update)
-		if !fi.Mode().IsRegular() {
-			return nil
-		}
-
 		// create a new dir/file header
 		header, err := tar.FileInfoHeader(fi, fi.Name())
 		if err != nil {
@@ -56,6 +51,12 @@ func Tar(src string, writers ...io.Writer) error {
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
+
+		// return on non-regular files
+		if !fi.Mode().IsRegular() {
+			return nil
+		}
+
 
 		// open files for taring
 		f, err := os.Open(file)

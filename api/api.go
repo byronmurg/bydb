@@ -14,6 +14,22 @@ import (
 )
 
 
+func getHttpResponseString(code uint64) string {
+	switch code {
+	case 200:
+		return "ok"
+	case 404:
+		return "not found"
+	case 405:
+		return "unknown command"
+	case 409:
+		return "conflict"
+	default:
+		return "unknown code"
+	}
+}
+
+
 type Api struct {
 	pb.UnimplementedByDbServer	
 	raft *dragonboat.NodeHost
@@ -45,13 +61,14 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 	switch cmd.Type {
 	case command.PUT, command.POST, command.DEL:
 		s.logger.Debugf("crud is alter")
-		_, err := s.raft.SyncPropose(ctx, cs, []byte(gCmd.Raw))
+		res, err := s.raft.SyncPropose(ctx, cs, []byte(gCmd.Raw))
 		if err != nil {
 			return nil, err
 		}
 
-		response.Code = 200
-		response.Document = "ok"
+		s.logger.Debug("res.value", res.Value)
+		response.Code = res.Value
+		response.Document = getHttpResponseString(res.Value)
 
 	case command.GET:
 		s.logger.Debugf("crud is get")

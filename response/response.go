@@ -1,6 +1,6 @@
 package response
 
 type Response struct {
-	Code int64
+	Code uint64
 	Body string
 }

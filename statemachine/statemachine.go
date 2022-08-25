@@ -1,12 +1,13 @@
 package statemachine
 
 import (
-	"encoding/binary"
 	"io"
 	"path/filepath"
 	"encoding/json"
 	"os"
 	"sync"
+	"fmt"
+	"strconv"
 
 	sm "github.com/lni/dragonboat/v4/statemachine"
 	"github.com/boltdb/bolt"
@@ -14,6 +15,7 @@ import (
 	. "omanom.com/bydb/store"
 	"omanom.com/bydb/command"
 	"omanom.com/bydb/zipper"
+	"omanom.com/bydb/document"
 	"omanom.com/bydb/response"
 	"omanom.com/bydb/logger"
 )
@@ -23,11 +25,23 @@ type ByStateMachine struct {
 	metaDb *bolt.DB
 	lastIndex uint64
 	logger *logger.Logger
-	entries []sm.Entry
-	entryMutex sync.Mutex
+	pending []*command.Command
+	pendingMutex sync.RWMutex
 }
 
 func NewByStateMachine(uint64, uint64) sm.IOnDiskStateMachine {
+
+	mkdirErr := os.MkdirAll(dir.DataPath(), os.ModePerm)
+	if mkdirErr != nil {
+		panic(mkdirErr)
+	}
+
+	mkSnapdirErr := os.MkdirAll(dir.SnapshotPath(), os.ModePerm)
+	if mkSnapdirErr != nil {
+		panic(mkSnapdirErr)
+	}
+
+
 	return &ByStateMachine{
 		store: NewStore(dir.DataPath()),
 		logger: logger.New("statemachine"),
@@ -48,6 +62,31 @@ func (s *ByStateMachine) Lookup(q any) (any, error) {
 
 	switch cmd.Type {
 	case command.GET:
+
+		{
+			s.pendingMutex.RLock()
+			defer s.pendingMutex.RUnlock()
+
+			// @TODO iterate through pending
+			for i := len(s.pending)-1 ; i >= 0; i-- {
+				pending := s.pending[i]
+				if cmd.Id == pending.Id && cmd.Part == pending.Part {
+					switch pending.Type {
+					case command.DEL:
+						res.Code = 404
+						res.Body = "not found"
+						return res, nil
+					case command.POST, command.PUT:
+						raw, jsErr := json.Marshal(pending.Doc)
+						if jsErr != nil { return nil, jsErr }
+						res.Code = 200
+						res.Body = string(raw)
+						return res, nil
+					}
+				}
+			}
+		}
+
 		raw, getErr := s.store.GetRaw(cmd.Part, cmd.Id)
 		if getErr != nil { return nil, getErr }
 
@@ -83,11 +122,15 @@ func (s *ByStateMachine) getLastUpdateIndex() (uint64, error) {
 		v := b.Get([]byte("lastUpdateIndex"))
 
 		if len(v) == 0 { return nil }
+		s.logger.Debug("retrieved lastIndex", string(v))
 
-		lastIndex = binary.LittleEndian.Uint64(v)
+		index, err := strconv.ParseUint(string(v), 10, 64)
+		lastIndex = index
 
-		return nil
+		return err
 	})
+
+	s.lastIndex = lastIndex
 
 	return lastIndex, viewErr
 }
@@ -96,30 +139,84 @@ func (s *ByStateMachine) updateLastUpdateIndex() error {
 	s.logger.Debugf("updating last log %d", s.lastIndex)
 	return s.metaDb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("meta"))
-		buf := make([]byte, 8)
-		binary.LittleEndian.PutUint64(buf, s.lastIndex)
-		return b.Put([]byte("lastUpdateIndex"), buf)
+		str := fmt.Sprintf("%d", s.lastIndex)
+		return b.Put([]byte("lastUpdateIndex"), []byte(str))
 	})
 }
 
 func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 	s.logger.Debug("in Update")
 
-	s.entryMutex.Lock()
-	defer s.entryMutex.Unlock()
+	s.pendingMutex.Lock()
+	defer s.pendingMutex.Unlock()
 
-	s.entries = append(s.entries, updates...)
+	var newPending []*command.Command
+
+	for ui, entry := range updates {
+		// Parse the command string into a cmd struct
+		cmd, jsErr := command.ParseCommand(string(entry.Cmd))
+		// It should havel already been validated so panic if
+		// there's an issue.
+		if jsErr != nil { panic(jsErr) }
+
+		var existingDoc *document.Document = nil
+
+		// See if we can find an existing document in
+		// the penging queue.
+		s.logger.Debug("searching in pending cmds")
+		for i := len(s.pending)-1 ; i >= 0; i-- {
+			pending := s.pending[i]
+			if cmd.Id == pending.Doc.Id && cmd.Part == pending.Doc.Part {
+				// There is a pending entry for this document
+				existingDoc = pending.Doc
+				break
+			}
+		}
+
+		// If no document is in the queue, search for one in
+		// state
+		if existingDoc == nil {
+			s.logger.Debug("searching in disk state")
+			doc, getErr := s.store.Get(cmd.Part, cmd.Id)
+			if getErr != nil {
+				return updates, getErr
+			}
+			existingDoc = doc
+		}
+
+		switch cmd.Type {
+		case command.PUT, command.DEL:
+			if existingDoc == nil {
+				updates[ui].Result.Value = 404
+				continue
+			}
+			if existingDoc.Updated <= cmd.Ts {
+				updates[ui].Result.Value = 409
+				continue
+			}
+		case command.POST:
+			if existingDoc != nil {
+				updates[ui].Result.Value = 409
+				continue
+			}
+		}
+
+		updates[ui].Result.Value = 200
+
+		// The sync operation has to know about the applied index
+		// so set it here
+		cmd.Index = entry.Index
+
+		newPending = append(newPending, cmd)
+	}
+
+	s.pending = append(s.pending, newPending...)
 
 	return updates, nil
 }
 
 func (s *ByStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 	s.logger.Debug("in open")
-
-	mkdirErr := os.MkdirAll(dir.DataPath(), os.ModePerm)
-	if mkdirErr != nil {
-		return 0, mkdirErr
-	}
 
 	metaDb, boltErr := bolt.Open(dir.MetaDbPath(), 0600, nil)
 	if boltErr != nil {
@@ -143,7 +240,8 @@ func (s *ByStateMachine) PrepareSnapshot() (any, error) {
 	lastUpdate, laErr := s.getLastUpdateIndex()
 	if laErr != nil { return nil, laErr }
 
-	targetPath := filepath.Join(dir.SnapshotPath(), string(lastUpdate)+".tgz")
+	fileName := fmt.Sprintf("%d.tgz", lastUpdate)
+	targetPath := filepath.Join(dir.SnapshotPath(), fileName)
 
 	s.logger.Debugf("preparing snapshot %s", targetPath)
 
@@ -173,20 +271,17 @@ func (s *ByStateMachine) SaveSnapshot(key any, writer io.Writer, done <-chan str
 func (s *ByStateMachine) Sync() error {
 	s.logger.Debug("in sync")
 
-	var appliedIndex uint64 = 0
 	if s.metaDb == nil { panic("metadb is closed") }
 
-	s.entryMutex.Lock()
-	defer s.entryMutex.Unlock()
+	s.pendingMutex.Lock()
+	defer s.pendingMutex.Unlock()
 
-	for _, entry := range s.entries {
-		s.logger.Debugf("Update recieved %s", entry.Cmd)
-		cmd, jsErr := command.ParseCommand(string(entry.Cmd))
-		if jsErr != nil { panic(jsErr) }
-
+	// Iterate through the pending interactions and write them
+	// to disk. We assume that they have already been validated.
+	for _, cmd := range s.pending {
 		switch cmd.Type {
 		case command.PUT, command.POST:
-			err := s.store.Put(&cmd.Doc)
+			err := s.store.Put(cmd.Doc)
 			if err != nil { return err }
 
 		case command.DEL:
@@ -197,11 +292,12 @@ func (s *ByStateMachine) Sync() error {
 			panic("unknown command in sync")
 		}
 
-		appliedIndex = entry.Index
+		// The command contains the index as applied
+		s.lastIndex = cmd.Index
 	}
 
-	s.lastIndex = appliedIndex
-	s.entries = []sm.Entry{}
+	// Clear the pending queue
+	s.pending = []*command.Command{}
 
 	return s.updateLastUpdateIndex()
 }

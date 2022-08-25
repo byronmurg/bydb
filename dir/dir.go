@@ -13,7 +13,7 @@ func SetPrefix(s string) {
 }
 
 func RootPath() string {
-	return filepath.Join(prefix, "example-store") //@TODO not this
+	return prefix
 }
 
 func MetaDbPath() string {

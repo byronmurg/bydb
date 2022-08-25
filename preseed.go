@@ -29,6 +29,8 @@ var (
 
 	minDuration int64 = 1e10
 	maxDuration int64 = 0
+
+	now int64 = time.Now().UnixMilli()
 )
 
 func callCrud(client pb.ByDbClient, msg string) *pb.Response {
@@ -62,7 +64,7 @@ func loadWords() ([]string, error) {
 func worker(partitions []string, client pb.ByDbClient, wordChan <-chan string, done chan<- bool) {
 	for word := range wordChan {
 		for _, part := range partitions {
-			cmd := fmt.Sprintf(`PUT { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ] }`, word, part, word, part, word)
+			cmd := fmt.Sprintf(`POST { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ], "updated":%d, "created":%d }`, word, part, word, part, word, now, now)
 			//cmd := fmt.Sprintf(`GET %s %s`, part, word)
 			res := callCrud(client, cmd)
 			if res.Code != 200 {
