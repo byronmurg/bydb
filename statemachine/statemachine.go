@@ -79,7 +79,7 @@ func (s *ByStateMachine) Lookup(q any) (any, error) {
 						return res, nil
 					case command.POST, command.PUT:
 						res.Code = 200
-						res.Body = cmd.RawDoc
+						res.Body = cmd.StringDoc
 						return res, nil
 					}
 				}
@@ -286,7 +286,7 @@ func (s *ByStateMachine) Sync() error {
 		for _, cmd := range pending {
 			switch cmd.Type {
 			case command.PUT, command.POST:
-				err := s.store.Put(cmd.Doc)
+				err := s.store.PutBytes(cmd.Doc, cmd.BytesDoc)
 				if err != nil { panic(err) }
 
 			case command.DEL:

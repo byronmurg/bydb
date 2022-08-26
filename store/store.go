@@ -35,12 +35,7 @@ func (p *partition) Close() {
 	p.block.Close()
 }
 
-func (p *partition) Add(doc *Document) error {
-
-	// Marshal the document into json []bytes
-	jsDoc, jsErr := json.Marshal(doc)
-	// Best to return before the db transaction begins
-	if jsErr != nil { return jsErr }
+func (p *partition) AddBytes(doc *Document, docBytes []byte) error {
 
 	// Begin a block bolt transaction
 	return p.block.Update(func(tx *bolt.Tx) error {
@@ -49,7 +44,7 @@ func (p *partition) Add(doc *Document) error {
 		if bucketErr != nil { return bucketErr }
 
 		// The block db is updated first
-		if err := b.Put([]byte(doc.Id), []byte(jsDoc)); err != nil {
+		if err := b.Put([]byte(doc.Id), docBytes); err != nil {
 			return err
 		}
 
@@ -59,6 +54,16 @@ func (p *partition) Add(doc *Document) error {
 		
 		return nil
 	})
+}
+
+func (p *partition) Add(doc *Document) error {
+
+	// Marshal the document into json []bytes
+	jsDoc, jsErr := json.Marshal(doc)
+	// Best to return before the db transaction begins
+	if jsErr != nil { return jsErr }
+
+	return p.AddBytes(doc, jsDoc)
 }
 
 func (p *partition) GetRaw(id string) ([]byte, error) {
@@ -248,6 +253,17 @@ func (s *store) Put(doc *Document) error {
 	defer part.Close()
 
 	return part.Add(doc)
+}
+
+func (s *store) PutBytes(doc *Document, docBytes []byte) error {
+	s.logger.Debugf("store PUTBYTES part:%s id:%s", doc.Part, doc.Id)
+	part, err := s.getPartition(doc.Part)
+	if err != nil {
+		return err
+	}
+	defer part.Close()
+
+	return part.AddBytes(doc, docBytes)
 }
 
 func (s *store) Get(partStr string, id string) (*Document, error) {
