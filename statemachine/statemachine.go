@@ -78,10 +78,8 @@ func (s *ByStateMachine) Lookup(q any) (any, error) {
 						res.Body = "not found"
 						return res, nil
 					case command.POST, command.PUT:
-						raw, jsErr := json.Marshal(pending.Doc)
-						if jsErr != nil { return nil, jsErr }
 						res.Code = 200
-						res.Body = string(raw)
+						res.Body = cmd.RawDoc
 						return res, nil
 					}
 				}

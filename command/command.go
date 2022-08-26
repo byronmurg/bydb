@@ -38,6 +38,7 @@ type Command struct {
 	Id string
 	Part string
 	Raw string
+	RawDoc string
 	Index uint64
 	Ts int64
 }
@@ -68,6 +69,7 @@ func ParseCommand(rawMsg string) (*Command, error) {
 	} else if putRegex.MatchString(msg) {
 		parts := putRegex.FindStringSubmatch(msg)
 		cmd.Type = PUT
+		cmd.RawDoc = parts[1]
 		jsErr := json.Unmarshal([]byte(parts[1]), &cmd.Doc)
 		if jsErr != nil { return nil, jsErr }
 		cmd.Part = cmd.Doc.Part
@@ -76,6 +78,7 @@ func ParseCommand(rawMsg string) (*Command, error) {
 	} else if postRegex.MatchString(msg) {
 		parts := postRegex.FindStringSubmatch(msg)
 		cmd.Type = POST
+		cmd.RawDoc = parts[1]
 		jsErr := json.Unmarshal([]byte(parts[1]), &cmd.Doc)
 		if jsErr != nil { return nil, jsErr }
 		cmd.Part = cmd.Doc.Part
