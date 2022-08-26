@@ -27,6 +27,7 @@ type ByStateMachine struct {
 	logger *logger.Logger
 	pending []*command.Command
 	pendingMutex sync.RWMutex
+	diskMutex sync.Mutex
 }
 
 func NewByStateMachine(uint64, uint64) sm.IOnDiskStateMachine {
@@ -147,11 +148,6 @@ func (s *ByStateMachine) updateLastUpdateIndex() error {
 func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 	s.logger.Debug("in Update")
 
-	s.pendingMutex.Lock()
-	defer s.pendingMutex.Unlock()
-
-	var newPending []*command.Command
-
 	for ui, entry := range updates {
 		// Parse the command string into a cmd struct
 		cmd, jsErr := command.ParseCommand(string(entry.Cmd))
@@ -164,6 +160,7 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 		// See if we can find an existing document in
 		// the penging queue.
 		s.logger.Debug("searching in pending cmds")
+		s.pendingMutex.RLock()
 		for i := len(s.pending)-1 ; i >= 0; i-- {
 			pending := s.pending[i]
 			if cmd.Id == pending.Doc.Id && cmd.Part == pending.Doc.Part {
@@ -172,6 +169,7 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 				break
 			}
 		}
+		s.pendingMutex.RUnlock()
 
 		// If no document is in the queue, search for one in
 		// state
@@ -207,10 +205,10 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 		// so set it here
 		cmd.Index = entry.Index
 
-		newPending = append(newPending, cmd)
+		s.pendingMutex.Lock()
+		s.pending = append(s.pending, cmd)
+		s.pendingMutex.Unlock()
 	}
-
-	s.pending = append(s.pending, newPending...)
 
 	return updates, nil
 }
@@ -237,6 +235,8 @@ func (s *ByStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 }
 
 func (s *ByStateMachine) PrepareSnapshot() (any, error) {
+	s.diskMutex.Lock()
+	defer s.diskMutex.Unlock()
 	lastUpdate, laErr := s.getLastUpdateIndex()
 	if laErr != nil { return nil, laErr }
 
@@ -255,6 +255,8 @@ func (s *ByStateMachine) PrepareSnapshot() (any, error) {
 }
 
 func (s *ByStateMachine) RecoverFromSnapshot(zip io.Reader, done <-chan struct{}) error {
+	s.diskMutex.Lock()
+	defer s.diskMutex.Unlock()
 	s.logger.Debug("recovering from snapshot")
 	return zipper.Untar(dir.DataPath(), zip)
 }
@@ -273,33 +275,44 @@ func (s *ByStateMachine) Sync() error {
 
 	if s.metaDb == nil { panic("metadb is closed") }
 
-	s.pendingMutex.Lock()
-	defer s.pendingMutex.Unlock()
+	s.pendingMutex.RLock()
+	pending := s.pending
+	s.pendingMutex.RUnlock()
 
-	// Iterate through the pending interactions and write them
-	// to disk. We assume that they have already been validated.
-	for _, cmd := range s.pending {
-		switch cmd.Type {
-		case command.PUT, command.POST:
-			err := s.store.Put(cmd.Doc)
-			if err != nil { return err }
+	go func() {
+		s.diskMutex.Lock()
+		defer s.diskMutex.Unlock()
 
-		case command.DEL:
-			err := s.store.Delete(cmd.Part, cmd.Id)
-			if err != nil { return err }
+		// Iterate through the pending interactions and write them
+		// to disk. We assume that they have already been validated.
+		for _, cmd := range pending {
+			switch cmd.Type {
+			case command.PUT, command.POST:
+				err := s.store.Put(cmd.Doc)
+				if err != nil { panic(err) }
 
-		default:
-			panic("unknown command in sync")
+			case command.DEL:
+				err := s.store.Delete(cmd.Part, cmd.Id)
+				if err != nil { panic(err) }
+
+			default:
+				panic("unknown command in sync")
+			}
+
+			// The command contains the index as applied
+			s.lastIndex = cmd.Index
 		}
 
-		// The command contains the index as applied
-		s.lastIndex = cmd.Index
-	}
+		// Clear the pending queue
+		s.pendingMutex.Lock()
+		s.pending = s.pending[len(pending):len(s.pending)]
+		defer s.pendingMutex.Unlock()
 
-	// Clear the pending queue
-	s.pending = []*command.Command{}
+		luiErr := s.updateLastUpdateIndex()
+		if luiErr != nil { panic(luiErr) }
+	}()
 
-	return s.updateLastUpdateIndex()
+	return nil
 }
 
 func (s *ByStateMachine) Close() error {
