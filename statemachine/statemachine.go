@@ -186,7 +186,7 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 				updates[ui].Result.Value = 404
 				continue
 			}
-			if existingDoc.Updated <= cmd.Ts {
+			if existingDoc.Updated != cmd.Ts {
 				updates[ui].Result.Value = 409
 				continue
 			}
@@ -256,7 +256,12 @@ func (s *ByStateMachine) RecoverFromSnapshot(zip io.Reader, done <-chan struct{}
 	s.diskMutex.Lock()
 	defer s.diskMutex.Unlock()
 	s.logger.Debug("recovering from snapshot")
-	return zipper.Untar(dir.DataPath(), zip)
+	zipErr := zipper.Untar(dir.DataPath(), zip)
+	if zipErr != nil { return zipErr }
+
+	lastUpdate, lastUpdateErr := s.getLastUpdateIndex()
+	s.lastIndex = lastUpdate
+	return lastUpdateErr
 }
 
 
@@ -273,13 +278,13 @@ func (s *ByStateMachine) Sync() error {
 
 	if s.metaDb == nil { panic("metadb is closed") }
 
-	s.pendingMutex.RLock()
-	pending := s.pending
-	s.pendingMutex.RUnlock()
-
 	go func() {
 		s.diskMutex.Lock()
 		defer s.diskMutex.Unlock()
+
+		s.pendingMutex.RLock()
+		pending := s.pending
+		s.pendingMutex.RUnlock()
 
 		// Iterate through the pending interactions and write them
 		// to disk. We assume that they have already been validated.

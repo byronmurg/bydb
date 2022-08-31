@@ -26,11 +26,6 @@ var (
 		"localhost:64002",
 		"localhost:64003",
 	}
-
-	minDuration int64 = 1e10
-	maxDuration int64 = 0
-
-	now int64 = time.Now().UnixMilli()
 )
 
 func callCrud(client pb.ByDbClient, msg string) *pb.Response {
@@ -61,28 +56,90 @@ func loadWords() ([]string, error) {
 	return words, nil
 }
 
-func worker(partitions []string, client pb.ByDbClient, wordChan <-chan string, done chan<- bool) {
-	for word := range wordChan {
-		for _, part := range partitions {
-			//cmd := fmt.Sprintf(`POST { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ], "updated":%d, "created":%d }`, word, part, word, part, word, now, now)
-			cmd := fmt.Sprintf(`GET %s %s`, part, word)
-			res := callCrud(client, cmd)
-			if res.Code != 200 {
-				log.Fatalf("recieved code: %d msg: %s cmd: %s", res.Code, res.Document, cmd)
-			}
-
-			if res.Duration < minDuration {
-				minDuration = res.Duration
-			}
-
-			if res.Duration > maxDuration {
-				maxDuration = res.Duration
-			}
-		}
-
-		done <- true
-	}
+type TestResults struct {
+	MaxDuration int64
+	MinDuration int64
+	Duration time.Duration
 }
+
+type testFormatCbk = func(string, string) string
+
+type TestBatch struct {
+	nWorkers int
+	partitions []string
+	words []string
+	formatCommand testFormatCbk
+	servers []pb.ByDbClient
+}
+
+func (s *TestBatch) Run() *TestResults {
+	//@TODO this
+
+	start := time.Now()
+
+	wordsPerWorker := len(s.words) / s.nWorkers
+	var wordBuf = s.words
+
+	doneChan := make(chan bool, s.nWorkers)
+
+	res := TestResults{
+		MinDuration: 10e6,
+		MaxDuration: 0,
+	}
+
+	for i := 0; i < s.nWorkers; i++ {
+		serverNo := i % len(s.servers)
+		server := s.servers[serverNo]
+		words := wordBuf[0:wordsPerWorker]
+		wordBuf = wordBuf[wordsPerWorker:len(wordBuf)]
+
+		var MinDuration int64 = 10e6
+		var MaxDuration int64 = 0
+
+		go func() {
+			for _, part := range s.partitions {
+				for _, word := range words {
+					
+					cmdStr := s.formatCommand(part, word)
+					res := callCrud(server, cmdStr)
+					if res.Code != 200 {
+						log.Fatalf("recieved code: %d msg: %s cmd: %s", res.Code, res.Document, cmdStr)
+					}
+
+					if res.Duration < MinDuration {
+						MinDuration = res.Duration
+					}
+
+					if res.Duration > MaxDuration {
+						MaxDuration = res.Duration
+					}
+				}
+			}
+
+			if MinDuration < res.MinDuration {
+				res.MinDuration = MinDuration
+			}
+
+			if MaxDuration > res.MaxDuration {
+				res.MaxDuration = MaxDuration
+			}
+
+			doneChan <- true
+
+		}()
+	}
+
+	// Wait for all workers to complete
+	for i := 0; i < s.nWorkers; i++ {
+		<-doneChan
+	}
+
+	res.Duration = time.Now().Sub(start)
+
+	return &res
+}
+
+
 
 func createServerClient(connString string) pb.ByDbClient {
 	
@@ -96,6 +153,12 @@ func createServerClient(connString string) pb.ByDbClient {
 	return client
 }
 
+func PrintResults(res *TestResults) {
+	fmt.Println("duration", res.Duration)
+	//fmt.Println("per-op", time.Duration(int(duration) / nJobs))
+	fmt.Println("min:", time.Duration(res.MinDuration), "max:", time.Duration(res.MaxDuration))
+}
+
 func main() {
 	flag.Parse()
 
@@ -104,7 +167,6 @@ func main() {
 
 	words := allWords[0:*nWords]
 	partitions := allWords[0:*nPartitions]
-	nJobs := *nWords * *nPartitions
 
 	fmt.Printf("partitions: %d words: %d\n", *nPartitions, *nWords)
 
@@ -114,42 +176,58 @@ func main() {
 		servers = append(servers, server)
 	}
 
-	wordChan := make(chan string, *nWords)
-	doneChan := make(chan bool, nJobs)
+	createTime := time.Now().UnixMilli()
+	updateTime := time.Now().UnixMilli()
 
-	for i := 0; i < *nWorkers; i++ {
-		serverI := i % len(servers)
-		go worker(partitions, servers[serverI], wordChan, doneChan)
+	postBatch := TestBatch{
+		formatCommand: func(part string, word string) string {
+			return fmt.Sprintf(`POST { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ], "updated":%d, "created":%d }`, word, part, word, part, word, createTime, createTime)
+		},
+		words: words,
+		partitions: partitions,
+		nWorkers: *nWorkers,
+		servers: servers,
 	}
 
-	start := time.Now()
+	fmt.Println("POST")
+	PrintResults(postBatch.Run())
 
-	for _, word := range words {
-		wordChan <- word
+	getBatch := TestBatch{
+		formatCommand: func(part string, word string) string {
+			return fmt.Sprintf(`GET %s %s`, part, word)
+		},
+		words: words,
+		partitions: partitions,
+		nWorkers: *nWorkers,
+		servers: servers,
 	}
 
+	fmt.Println("GET")
+	PrintResults(getBatch.Run())
 
-	for i := 0; i < *nWords ; i++ {
-		<-doneChan
+	putBatch := TestBatch{
+		formatCommand: func(part string, word string) string {
+			return fmt.Sprintf(`PUT %d { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ], "updated":%d, "created":%d }`, createTime, word, part, word, part, word, updateTime, updateTime)
+		},
+		words: words,
+		partitions: partitions,
+		nWorkers: *nWorkers,
+		servers: servers,
 	}
 
-	duration := time.Now().Sub(start)
+	fmt.Println("PUT")
+	PrintResults(putBatch.Run())
 
-	fmt.Println("duration", duration)
-	fmt.Println("per-op", time.Duration(int(duration) / nJobs))
-	fmt.Println("min:", time.Duration(minDuration), "max:", time.Duration(maxDuration))
-
-	/*
-	for _, cli := range servers {
-		cli.Close()
+	delBatch := TestBatch{
+		formatCommand: func(part string, word string) string {
+			return fmt.Sprintf(`DEL %s %s %d`, part, word, updateTime)
+		},
+		words: words,
+		partitions: partitions,
+		nWorkers: *nWorkers,
+		servers: servers,
 	}
 
-
-
-
-	callCrud("GET omanom 1234")
-	callCrud(`PUT { "part":"omanom", "id":"1234", "index":{ "foo":"bar" }, "block": { "hide":"me" }, "categories": ["active=true"] }`)
-	callCrud(`SEARCH omanom "bar"`)
-	callCrud(`SEAR omanom "bar"`) //invalid
-	*/
+	fmt.Println("DEL")
+	PrintResults(delBatch.Run())
 }

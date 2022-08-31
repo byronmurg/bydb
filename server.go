@@ -41,10 +41,15 @@ func enableDragonboatLogging() {
 	logger.GetLogger("grpc").SetLevel(logger.WARNING)
 }
 
+func isFirstRun() bool {
+    _, err := os.Stat(dir.DataPath())
+    return os.IsNotExist(err)
+}
+
 func main() {
 	replicaID := flag.Int("replicaid", 1, "ReplicaID to use")
 	addr := flag.String("addr", "", "Nodehost address")
-	join := flag.Bool("join", false, "Joining a new node")
+	join := false
 	flag.Parse()
 
 
@@ -55,16 +60,16 @@ func main() {
 	}
 
 	initialMembers := make(map[uint64]string)
-	if !*join {
+
+	if !join {
 		for idx, v := range addresses {
 			initialMembers[uint64(idx+1)] = v
 		}
 	}
 
-	nodeAddr := initialMembers[uint64(*replicaID)]
+	nodeAddr := addresses[*replicaID-1]
 	grpcAddr := gaddresses[*replicaID-1]
 
-	
 	fmt.Printf("node address: %s\n", nodeAddr)
 	enableDragonboatLogging()
 
@@ -95,7 +100,7 @@ func main() {
 		panic(err)
 	}
 
-	if err := nh.StartOnDiskReplica(initialMembers, *join, NewByStateMachine, rc); err != nil {
+	if err := nh.StartOnDiskReplica(initialMembers, join, NewByStateMachine, rc); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to add cluster, %v\n", err)
 		os.Exit(1)
 	}

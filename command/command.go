@@ -22,11 +22,11 @@ const (
 
 
 var (
-	getRegex = regexp.MustCompile(`^GET (\w+) (\S+)$`)
-	delRegex = regexp.MustCompile(`^DEL (\w+) (\S+) (\d+)$`)
-	putRegex = regexp.MustCompile(`^PUT ({.*})$`)
+	getRegex = regexp.MustCompile(`^GET (\S+) (\S+)$`)
+	delRegex = regexp.MustCompile(`^DEL (\S+) (\S+) (\d+)$`)
+	putRegex = regexp.MustCompile(`^PUT (\d+) ({.*})$`)
 	postRegex = regexp.MustCompile(`^POST ({.*})$`)
-	searchRegex = regexp.MustCompile(`^SEARCH (\w+) (.+)$`)
+	searchRegex = regexp.MustCompile(`^SEARCH (\S+) (.+)$`)
 
 	unknownCommandErr = errors.New("unknown command")
 )
@@ -70,13 +70,17 @@ func ParseCommand(rawMsg string) (*Command, error) {
 	} else if putRegex.MatchString(msg) {
 		parts := putRegex.FindStringSubmatch(msg)
 		cmd.Type = PUT
-		cmd.StringDoc = parts[1]
+		cmd.StringDoc = parts[2]
 		cmd.BytesDoc = []byte(cmd.StringDoc)
 		jsErr := json.Unmarshal(cmd.BytesDoc, &cmd.Doc)
 		if jsErr != nil { return nil, jsErr }
 		cmd.Part = cmd.Doc.Part
 		cmd.Id = cmd.Doc.Id
-		cmd.Ts = cmd.Doc.Updated
+		ts, tsErr := strconv.ParseInt(parts[1], 10, 64)
+		if tsErr != nil {
+			return nil, tsErr
+		}
+		cmd.Ts = ts
 	} else if postRegex.MatchString(msg) {
 		parts := postRegex.FindStringSubmatch(msg)
 		cmd.Type = POST
