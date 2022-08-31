@@ -2,6 +2,7 @@ package store
 
 import (
 	"os"
+	"sync"
 	"omanom.com/bydb/logger"
 	"path/filepath"
 	"github.com/blevesearch/bleve/v2"
@@ -28,9 +29,14 @@ type partition struct {
 	block *bolt.DB
 	name string
 	logger *logger.Logger
+	store *store
 }
 
 func (p *partition) Close() {
+	p.store.RemovePart(p.name)
+}
+
+func (p *partition) InnerClose() {
 	p.index.Close()
 	p.block.Close()
 }
@@ -210,7 +216,7 @@ func openOrCreateBleve(partitionPath string) (bleve.Index, error) {
 	}
 }
 
-func OpenPartition(name string, partitionPath string, logger *logger.Logger) (*partition, error) {
+func OpenPartition(name string, partitionPath string, logger *logger.Logger, s *store) (*partition, error) {
 	blevePath := filepath.Join(partitionPath, "index")
 	index, blErr := openOrCreateBleve(blevePath)
 	if blErr != nil { return nil, blErr }
@@ -227,6 +233,7 @@ func OpenPartition(name string, partitionPath string, logger *logger.Logger) (*p
 		block: block,
 		name: name,
 		logger: logger,
+		store: s,
 	}
 
 	return &part, nil
@@ -237,11 +244,43 @@ func OpenPartition(name string, partitionPath string, logger *logger.Logger) (*p
 type store struct {
 	basePath string
 	logger *logger.Logger
+
+	partMap map[string]*partition
+	partLog []string
+	partLock sync.Mutex
+}
+
+func (s *store) RemovePart(part string) {
+	
 }
 
 func (s *store) getPartition(part string) (*partition, error) {
 	blevePath := filepath.Join(s.basePath, "part", part)
-	return OpenPartition(part, blevePath, s.logger)
+
+	s.partLock.Lock()
+	curr, ok := s.partMap[part]
+	defer s.partLock.Unlock()
+
+	if ok {
+		return curr, nil
+	} else {
+		p, err := OpenPartition(part, blevePath, s.logger, s)
+		if err != nil { return nil, err }
+
+		s.partMap[part] = p
+		s.partLog = append(s.partLog, part)
+
+		//@TODO configurable
+		if len(s.partLog) >= 100 {
+			oldKey := s.partLog[0]
+			s.partLog = s.partLog[1:]
+			oldPart := s.partMap[oldKey]
+			delete(s.partMap, oldKey)
+			oldPart.InnerClose()
+		}
+
+		return p, nil
+	}
 }
 
 func (s *store) Put(doc *Document) error {
@@ -287,6 +326,7 @@ func (s *store) GetRaw(partStr string, id string) ([]byte, error) {
 }
 
 func (s *store) Delete(partStr string, id string) error {
+	s.logger.Debugf("store DEL part:%s id:%s", partStr, id)
 	part, err := s.getPartition(partStr)
 	if err != nil {
 		return err
@@ -322,5 +362,6 @@ func NewStore(basePath string) (*store) {
 	return &store{
 		basePath: basePath,
 		logger: logger.New("store"),
+		partMap: map[string]*partition{},
 	}
 }

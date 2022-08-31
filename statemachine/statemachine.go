@@ -308,8 +308,8 @@ func (s *ByStateMachine) Sync() error {
 
 		// Clear the pending queue
 		s.pendingMutex.Lock()
-		s.pending = s.pending[len(pending):len(s.pending)]
-		defer s.pendingMutex.Unlock()
+		s.pending = s.pending[len(pending):]
+		s.pendingMutex.Unlock()
 
 		luiErr := s.updateLastUpdateIndex()
 		if luiErr != nil { panic(luiErr) }
