@@ -25,7 +25,7 @@ func callCrud(msg string) {
 	defer cancel()
 	r, err := client.Crud(ctx, &pb.Command{Raw: msg})
 	if err != nil {
-		log.Fatalf("could not greet: %v", err)
+		log.Fatalf("crud error: %v", err)
 	}
 	fmt.Print(r.GetDocument(), "\n")
 }
@@ -64,21 +64,15 @@ func main() {
 			break
 		}
 
-		if str == "exit" || str == "EXIT" {
+		if s.ToLower(str) == "exit" {
 			break
 		}
 
-		if str == "" {
+		switch str {
+		case "":
 			continue
+		default:
+			callCrud(str)
 		}
-
-		callCrud(str)
 	}
-
-	/*
-	callCrud("GET omanom 1234")
-	callCrud(`PUT { "part":"omanom", "id":"1234", "index":{ "foo":"bar" }, "block": { "hide":"me" }, "categories": ["active=true"] }`)
-	callCrud(`SEARCH omanom "bar"`)
-	callCrud(`SEAR omanom "bar"`) //invalid
-	*/
 }

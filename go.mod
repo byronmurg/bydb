@@ -6,10 +6,11 @@ require (
 	github.com/blevesearch/bleve/v2 v2.3.3
 	github.com/boltdb/bolt v1.3.1
 	github.com/golang/protobuf v1.5.2
-	github.com/lni/dragonboat/v4 v4.0.0-20220809152834-6d5cf9dec622
+	github.com/lni/dragonboat/v4 v4.0.0-20220830122730-42573c0b37fc
 	github.com/lni/goutils v1.3.1-0.20220604063047-388d67b4dbc4
 	google.golang.org/grpc v1.38.0
 	google.golang.org/protobuf v1.26.0
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
 
 require (

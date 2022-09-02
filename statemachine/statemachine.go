@@ -256,6 +256,9 @@ func (s *ByStateMachine) RecoverFromSnapshot(zip io.Reader, done <-chan struct{}
 	s.diskMutex.Lock()
 	defer s.diskMutex.Unlock()
 	s.logger.Debug("recovering from snapshot")
+
+	s.store.CloseAllPartitions()
+
 	zipErr := zipper.Untar(dir.DataPath(), zip)
 	if zipErr != nil { return zipErr }
 

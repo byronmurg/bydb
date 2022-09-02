@@ -3,6 +3,7 @@ package api
 import (
 	"net"
 	"time"
+	"fmt"
 	"context"
 	"github.com/lni/dragonboat/v4"
 	"google.golang.org/grpc"
@@ -39,7 +40,8 @@ type Api struct {
 
 func (s Api) Hello(ctx context.Context, grt *pb.Greeting) (*pb.Greeting, error) {
 	s.logger.Debugf("Hello recieved %s", grt.Msg)
-	return &pb.Greeting{ Msg:"server active" }, nil //@TODO actually check
+	msg := fmt.Sprintf("server %s active", s.raft.ID())
+	return &pb.Greeting{ Msg:msg }, nil //@TODO actually check
 }
 
 func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
@@ -91,6 +93,35 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 		res := result.(Response)
 		response.Code = res.Code
 		response.Document = res.Body
+
+
+
+	case command.JOIN_NODE:
+		membership, err := s.raft.SyncGetShardMembership(ctx, s.shardId)
+		if err != nil { return nil, err }
+
+		var maxId uint64
+		for idx, _ := range membership.Nodes {
+			if idx > maxId {
+				maxId = idx
+			}
+		}
+
+		joinErr := s.raft.SyncRequestAddReplica(
+			ctx,
+			s.shardId,
+			maxId +1,
+			cmd.Id,
+			membership.ConfigChangeID,
+		)
+
+		if joinErr != nil {
+			return nil, joinErr
+		}
+
+		response.Code = 200
+		response.Document = "ok"
+
 
 	default:
 		response.Code = 405

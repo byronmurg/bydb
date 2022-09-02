@@ -1,0 +1,13 @@
+---
+initial_nodes:
+- "localhost:63001"
+- "localhost:63002"
+- "localhost:63003"
+# GrpcAddress: "localhost:64001"
+raft:
+  shard_id: 128
+  snapshot_entries: 100
+  compaction_overhead: 20
+  election_rtt: 10
+  heartbeat_rtt: 1
+  rtt_millisecond: 200

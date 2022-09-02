@@ -254,12 +254,25 @@ func (s *store) RemovePart(part string) {
 	
 }
 
+func (s *store) CloseAllPartitions() {
+	s.partLock.Lock()
+	defer s.partLock.Unlock()
+
+	for _, key := range s.partLog {
+		part := s.partMap[key]
+		delete(s.partMap, key)
+		part.InnerClose()
+	}
+
+	s.partLog = []string{}
+}
+
 func (s *store) getPartition(part string) (*partition, error) {
 	blevePath := filepath.Join(s.basePath, "part", part)
 
 	s.partLock.Lock()
-	curr, ok := s.partMap[part]
 	defer s.partLock.Unlock()
+	curr, ok := s.partMap[part]
 
 	if ok {
 		return curr, nil

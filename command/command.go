@@ -18,6 +18,9 @@ const (
 	DEL
 	POST
 	SEARCH
+
+	// Admin commands
+	JOIN_NODE
 )
 
 
@@ -27,6 +30,8 @@ var (
 	putRegex = regexp.MustCompile(`^PUT (\d+) ({.*})$`)
 	postRegex = regexp.MustCompile(`^POST ({.*})$`)
 	searchRegex = regexp.MustCompile(`^SEARCH (\S+) (.+)$`)
+
+	joinNodeRegex = regexp.MustCompile(`^JOIN_NODE (\S+)$`)
 
 	unknownCommandErr = errors.New("unknown command")
 )
@@ -57,16 +62,12 @@ func ParseCommand(rawMsg string) (*Command, error) {
 		cmd.Part = parts[1]
 		cmd.Id = parts[2]
 
-	} else if delRegex.MatchString(msg) {
-		parts := delRegex.FindStringSubmatch(msg)
-		cmd.Type = DEL
+	} else if searchRegex.MatchString(msg) {
+		parts := searchRegex.FindStringSubmatch(msg)
+		cmd.Type = SEARCH
 		cmd.Part = parts[1]
-		cmd.Id = parts[2]
-		ts, tsErr := strconv.ParseInt(parts[3], 10, 64)
-		if tsErr != nil {
-			return nil, tsErr
-		}
-		cmd.Ts = ts
+		cmd.Query = parts[2]
+
 	} else if putRegex.MatchString(msg) {
 		parts := putRegex.FindStringSubmatch(msg)
 		cmd.Type = PUT
@@ -92,11 +93,21 @@ func ParseCommand(rawMsg string) (*Command, error) {
 		cmd.Id = cmd.Doc.Id
 		cmd.Ts = cmd.Doc.Created //@TODO is this correct?
 		// @TODO error if Created and Updated are not the same / greater
-	} else if searchRegex.MatchString(msg) {
-		parts := searchRegex.FindStringSubmatch(msg)
-		cmd.Type = SEARCH
+	} else if delRegex.MatchString(msg) {
+		parts := delRegex.FindStringSubmatch(msg)
+		cmd.Type = DEL
 		cmd.Part = parts[1]
-		cmd.Query = parts[2]
+		cmd.Id = parts[2]
+		ts, tsErr := strconv.ParseInt(parts[3], 10, 64)
+		if tsErr != nil {
+			return nil, tsErr
+		}
+		cmd.Ts = ts
+
+	} else if joinNodeRegex.MatchString(msg) {
+		parts := joinNodeRegex.FindStringSubmatch(msg)
+		cmd.Type = JOIN_NODE
+		cmd.Id = parts[1]
 
 	} else {
 		return nil, unknownCommandErr

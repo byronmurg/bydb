@@ -1,37 +1,20 @@
 package main
 
 import (
-	//"context"
-	"flag"
 	"fmt"
 	"os"
-	//"time"
-	//"encoding/json"
+
+	"encoding/json"
+	
 
 	"github.com/lni/dragonboat/v4"
-	"github.com/lni/dragonboat/v4/config"
+	raftconfig "github.com/lni/dragonboat/v4/config"
 	"github.com/lni/dragonboat/v4/logger"
-	//"github.com/lni/goutils/syncutil"
 
 	"omanom.com/bydb/dir"
+	"omanom.com/bydb/config"
 	. "omanom.com/bydb/statemachine"
 	. "omanom.com/bydb/api"
-)
-
-// @TODO remove this
-var (
-	// initial nodes count is fixed to three, their addresses are also fixed
-	addresses = []string{
-		"localhost:63001",
-		"localhost:63002",
-		"localhost:63003",
-	}
-
-	gaddresses = []string{
-		"localhost:64001",
-		"localhost:64002",
-		"localhost:64003",
-	}
 )
 
 func enableDragonboatLogging() {
@@ -46,52 +29,75 @@ func isFirstRun() bool {
     return os.IsNotExist(err)
 }
 
+func Dump(input any) {
+	bytes, err := json.MarshalIndent(input, "", "  ")
+	if err != nil { panic(err) }
+	fmt.Println(string(bytes))
+}
+
 func main() {
-	replicaID := flag.Int("replicaid", 1, "ReplicaID to use")
-	addr := flag.String("addr", "", "Nodehost address")
-	join := false
-	flag.Parse()
 
+	cnf, cfErr := config.LoadConfig()
+	if cfErr != nil { panic(cfErr) }
+	Dump(cnf)
 
-	// @TODO all this is in place of a proper discovery system
-	if len(*addr) == 0 && *replicaID != 1 && *replicaID != 2 && *replicaID != 3 {
-		fmt.Fprintf(os.Stderr, "replica id must be 1, 2 or 3 when address is not specified\n")
-		os.Exit(1)
-	}
-
-	initialMembers := make(map[uint64]string)
-
-	if !join {
-		for idx, v := range addresses {
-			initialMembers[uint64(idx+1)] = v
-		}
-	}
-
-	nodeAddr := addresses[*replicaID-1]
-	grpcAddr := gaddresses[*replicaID-1]
-
-	fmt.Printf("node address: %s\n", nodeAddr)
-	enableDragonboatLogging()
-
-
-	rc := config.Config{
-		ReplicaID:          uint64(*replicaID),
-		ShardID:            128, //<- @TODO this is a made up shardid
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    100, //<- @TODO this needs to be more in real life
-		CompactionOverhead: 20,
-	}
+	replicaID := cnf.ReplicaId
 
 	//@TODO this just picks me an unused path
-	dir.SetPrefix(fmt.Sprintf("test-run/node%d", *replicaID))
+	dir.SetPrefix(fmt.Sprintf("test-run/node-%d", replicaID))
+
+	isInitNode := cnf.IsInitNode()
+	join := isFirstRun() && !isInitNode
+
+	initialMembers := make(map[uint64]string)
+	if isFirstRun() && !join {
+		initialMembers = cnf.InitialNodeMap()
+	}
+
+	nodeAddr := cnf.NodeAddress()
+
+	if nodeAddr == "" {
+		panic("unable to determine node address")
+	}
+
+	grpcAddr := cnf.GrpcAddress
+
+	if grpcAddr == "" {
+		panic("unable to determine grpc address")
+	}
+
+	fmt.Println("replicaID: ", replicaID)
+	fmt.Println("node address: ", nodeAddr)
+	fmt.Println("join: ", join)
+	fmt.Println("is init node: ", isInitNode)
+	fmt.Println("is firt run: ", isFirstRun())
+
+	enableDragonboatLogging()
+
+	/*
+	var nodeHostId string
+	if isInitNode != 0 {
+		nodeHostId = fmt.Sprintf("initNode-%d", *replicaID)
+	}
+	*/
+
+	rc := raftconfig.Config{
+		ReplicaID:          cnf.ReplicaId,
+		ShardID:            cnf.Raft.ShardId,
+		ElectionRTT:        cnf.Raft.ElectionRTT,
+		HeartbeatRTT:       cnf.Raft.HeartbeatRTT,
+		CheckQuorum:        true,
+		SnapshotEntries:    cnf.Raft.SnapshotEntries,
+		CompactionOverhead: cnf.Raft.CompactionOverhead,
+	}
+
 	datadir := dir.RaftPath()
 
-	nhc := config.NodeHostConfig{
+	nhc := raftconfig.NodeHostConfig{
 		WALDir:         datadir,
+		//NodeHostID:     nodeHostId,
 		NodeHostDir:    datadir,
-		RTTMillisecond: 200,
+		RTTMillisecond: cnf.Raft.RTTMillisecond,
 		RaftAddress:    nodeAddr,
 	}
 
