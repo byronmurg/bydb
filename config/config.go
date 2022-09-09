@@ -54,6 +54,7 @@ var (
 
 func LoadConfig() (*Config, error) {
 	cnf := Config{
+		// These are effectively our defaults
 		GrpcAddress: "localhost:64001",
 		Raft: raftConfig{
 			ShardId: 128,

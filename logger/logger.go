@@ -3,13 +3,15 @@ package logger
 import (
 	"log"
 	"os"
-	"regexp"
 )
 
 var def = log.Default()
 
 var debugEnv = os.Getenv("DEBUG")
-var debugRe = regexp.MustCompile(debugEnv)
+
+func Test(prefix string) bool {
+	return debugEnv == "true"
+}
 
 type Logger struct {
 	u *log.Logger
@@ -47,7 +49,7 @@ func (s *Logger) Fatalf(format string, p ...any) {
 
 func (s *Logger) Extend(prefix string) *Logger {
 	newPrefix := s.prefix +"."+ prefix
-	inDebug := debugEnv != "" && debugRe.MatchString(newPrefix)
+	inDebug := Test(prefix)
 
 	return &Logger{
 		prefix: "",

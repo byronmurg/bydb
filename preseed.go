@@ -167,8 +167,9 @@ func main() {
 
 	words := allWords[0:*nWords]
 	partitions := allWords[0:*nPartitions]
+	total := *nPartitions * *nWords
 
-	fmt.Printf("partitions: %d words: %d\n", *nPartitions, *nWords)
+	fmt.Printf("partitions: %d words: %d total: %d\n", *nPartitions, *nWords, total)
 
 	var servers []pb.ByDbClient
 	for _, addr := range gaddresses {

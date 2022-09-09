@@ -135,7 +135,7 @@ func (s *ByStateMachine) getLastUpdateIndex() (uint64, error) {
 }
 
 func (s *ByStateMachine) updateLastUpdateIndex() error {
-	s.logger.Debugf("updating last log %d", s.lastIndex)
+	s.logger.Logf("updating last log %d", s.lastIndex)
 	return s.metaDb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("meta"))
 		str := fmt.Sprintf("%d", s.lastIndex)
