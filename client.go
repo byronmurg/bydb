@@ -1,18 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"flag"
-	"os"
 	"log"
 	"time"
+	"regexp"
+	"errors"
+	"encoding/json"
 	s "strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "omanom.com/bydb/proto"
+
+	"github.com/manifoldco/promptui"
 )
 
 var (
@@ -28,6 +31,11 @@ func callCrud(msg string) {
 		log.Fatalf("crud error: %v", err)
 	}
 	fmt.Print(r.GetDocument(), "\n")
+}
+
+type CommandEntry struct {
+	Prefix string
+	Pattern string
 }
 
 func main() {
@@ -49,30 +57,46 @@ func main() {
 	}
 	fmt.Printf("Server: %s\n", r.GetMsg())
 
+	commands := []CommandEntry{}
+	commandJsErr := json.Unmarshal([]byte(r.GetCommandlist()), &commands)
+	if commandJsErr != nil { panic(commandJsErr) }
 
+	validate := func(input string) error {
+		if s.ToLower(input) == "exit" {
+			return nil
+		}
 
-	cli := bufio.NewReader(os.Stdin)
+		for _, cmd := range commands {
+			if s.HasPrefix(input, cmd.Prefix) {
+				r := regexp.MustCompile(cmd.Pattern)
+				if ! r.MatchString(input) {
+					return errors.New("invalid format for command "+ cmd.Prefix)
+				} else {
+					return nil
+				}
+			}
+		}
+
+		return errors.New("no matching command found")
+	}
+
+	prompt := promptui.Prompt{
+		Label: "$",
+		Validate: validate,
+	}
 
 	for {
-		fmt.Printf("$ ")
-
-		rawStr, err := cli.ReadString('\n')
-		str := s.TrimSpace(rawStr)
+		result, err := prompt.Run()
 
 		if err != nil {
-			fmt.Print(err)
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+
+		if "exit" == s.ToLower(result) {
 			break
 		}
 
-		if s.ToLower(str) == "exit" {
-			break
-		}
-
-		switch str {
-		case "":
-			continue
-		default:
-			callCrud(str)
-		}
+		callCrud(result)
 	}
 }

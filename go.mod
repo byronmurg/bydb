@@ -8,6 +8,7 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/lni/dragonboat/v4 v4.0.0-20220830122730-42573c0b37fc
 	github.com/lni/goutils v1.3.1-0.20220604063047-388d67b4dbc4
+	github.com/manifoldco/promptui v0.9.0
 	google.golang.org/grpc v1.38.0
 	google.golang.org/protobuf v1.26.0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
@@ -35,6 +36,7 @@ require (
 	github.com/blevesearch/zapx/v14 v14.3.4 // indirect
 	github.com/blevesearch/zapx/v15 v15.3.4 // indirect
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
+	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/cockroachdb/errors v1.9.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/pebble v0.0.0-20220407171941-2120d145e292 // indirect

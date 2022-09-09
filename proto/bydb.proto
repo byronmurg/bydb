@@ -11,6 +11,7 @@ service ByDb {
 
 message Greeting {
 	string msg = 1;
+	string commandlist = 2;
 }
 
 message Response {

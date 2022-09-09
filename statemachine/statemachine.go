@@ -161,7 +161,7 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 		s.pendingMutex.RLock()
 		for i := len(s.pending)-1 ; i >= 0; i-- {
 			pending := s.pending[i]
-			if cmd.Id == pending.Doc.Id && cmd.Part == pending.Doc.Part {
+			if cmd.Id == pending.Id && cmd.Part == pending.Part {
 				// There is a pending entry for this document
 				existingDoc = pending.Doc
 				break

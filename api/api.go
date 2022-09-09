@@ -7,6 +7,7 @@ import (
 	"context"
 	"github.com/lni/dragonboat/v4"
 	"google.golang.org/grpc"
+	"encoding/json"
 
 	pb "omanom.com/bydb/proto"
 	"omanom.com/bydb/command"
@@ -40,8 +41,13 @@ type Api struct {
 
 func (s Api) Hello(ctx context.Context, grt *pb.Greeting) (*pb.Greeting, error) {
 	s.logger.Debugf("Hello recieved %s", grt.Msg)
+
+	// format a generic greeting
 	msg := fmt.Sprintf("server %s active", s.raft.ID())
-	return &pb.Greeting{ Msg:msg }, nil //@TODO actually check
+
+	cmdList, jsErr := json.Marshal(command.CommandFormats)
+
+	return &pb.Greeting{ Msg:msg, Commandlist:string(cmdList) }, jsErr
 }
 
 func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
