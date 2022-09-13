@@ -49,7 +49,7 @@ func (s *Logger) Fatalf(format string, p ...any) {
 
 func (s *Logger) Extend(prefix string) *Logger {
 	newPrefix := s.prefix +"."+ prefix
-	inDebug := Test(prefix)
+	inDebug := Test(newPrefix)
 
 	return &Logger{
 		prefix: "",
