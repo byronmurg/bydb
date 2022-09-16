@@ -85,7 +85,7 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 			return nil, err
 		}
 
-		res := result.(Response)
+		res := result.(*Response)
 		response.Code = res.Code
 		response.Document = res.Body
 
