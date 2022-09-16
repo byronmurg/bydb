@@ -58,8 +58,8 @@ func LoadConfig() (*Config, error) {
 		GrpcAddress: "localhost:64001",
 		Raft: raftConfig{
 			ShardId: 128,
-			SnapshotEntries: 100,
-			CompactionOverhead: 20,
+			SnapshotEntries: 1000,
+			CompactionOverhead: 200,
 			ElectionRTT: 10,
 			HeartbeatRTT: 1,
 			RTTMillisecond: 200,

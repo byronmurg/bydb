@@ -1,0 +1,13 @@
+partitions: 10 words: 100 total: 1000
+POST
+duration 4.778055498s
+min: 9.039881ms max: 152.186759ms
+GET
+duration 84.820988ms
+min: 102.185µs max: 16.228017ms
+PUT
+duration 4.408334045s
+min: 8.447866ms max: 128.357608ms
+DEL
+duration 4.657540495s
+min: 10ms max: 123.040328ms

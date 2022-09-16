@@ -28,6 +28,14 @@ func DataPath() string {
 	return filepath.Join(RootPath(), "data")
 }
 
+func BlockPath() string {
+	return filepath.Join(DataPath(), "block")
+}
+
+func IndexPath() string {
+	return filepath.Join(DataPath(), "index")
+}
+
 func SnapshotPath() string {
 	return filepath.Join(RootPath(), "snapshots")
 }

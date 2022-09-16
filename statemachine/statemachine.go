@@ -5,14 +5,17 @@ import (
 	"path/filepath"
 	"encoding/json"
 	"os"
-	"sync"
+	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/mapping"
+	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
 
 	sm "github.com/lni/dragonboat/v4/statemachine"
 	"github.com/boltdb/bolt"
 	"omanom.com/bydb/dir"
-	. "omanom.com/bydb/store"
 	"omanom.com/bydb/command"
 	"omanom.com/bydb/zipper"
 	"omanom.com/bydb/document"
@@ -20,34 +23,179 @@ import (
 	"omanom.com/bydb/logger"
 )
 
+const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+type Shard struct {
+	Index bleve.Index
+	Block *bolt.DB
+}
+
+func (s *Shard) Close() {
+	s.Index.Close()
+	s.Block.Close()
+}
+
+
+type ShardMap = map[rune]*Shard
+
+
+
+
+func getFirstRune(str string) rune {
+	var first rune
+	for _, c := range str {
+		first = c
+		break
+	}
+	return first
+}
+
+
+
+
+
+
 type ByStateMachine struct {
-	store *Store
+	shardMap ShardMap
 	metaDb *bolt.DB
 	lastIndex uint64
 	logger *logger.Logger
-	pending []*command.Command
-	pendingMutex sync.RWMutex
-	diskMutex sync.Mutex
+	pending []updateEntry
+}
+
+func makeDirOrPanic(dir string) {
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		panic(err)
+	}
+}
+
+func createDefaultMapping() *mapping.IndexMappingImpl {
+	mapping := bleve.NewIndexMapping()
+
+	indexFieldMapping := bleve.NewDocumentMapping()
+
+	storeOnlyFieldMapping := bleve.NewTextFieldMapping()
+	storeOnlyFieldMapping.Analyzer = keyword.Name
+	storeOnlyFieldMapping.Store = true
+	storeOnlyFieldMapping.Index = true
+	storeOnlyFieldMapping.IncludeInAll = false
+	storeOnlyFieldMapping.IncludeTermVectors = false
+
+	documentMapping := bleve.NewDocumentStaticMapping()
+	documentMapping.AddSubDocumentMapping("index", indexFieldMapping)
+	documentMapping.AddFieldMappingsAt("categories", storeOnlyFieldMapping)
+
+	mapping.DefaultMapping = documentMapping
+
+	return mapping
+}
+
+func openOrCreateBleve(partitionPath string) (bleve.Index, error) {
+    _, err := os.Stat(partitionPath)
+
+    if os.IsNotExist(err) {
+		mapping := createDefaultMapping()
+		return bleve.New(partitionPath, mapping)
+    } else {
+		return bleve.Open(partitionPath)
+	}
+}
+
+func (s *ByStateMachine) OpenShardMap() {
+	for _, c := range alphabet {
+		blevePath := filepath.Join(dir.IndexPath(), string(c))
+		index, indexErr := openOrCreateBleve(blevePath)
+		if indexErr != nil { panic(indexErr) }
+
+		boltPath := filepath.Join(dir.BlockPath(), string(c))
+		block, blockErr := bolt.Open(boltPath, 0600, nil)
+		if blockErr != nil { panic(blockErr) }
+
+		s.shardMap[c] = &Shard{
+			Index: index,
+			Block: block,
+		}
+	}
+}
+
+func (s *ByStateMachine) CloseShardMap() {
+	for _, c := range alphabet {
+		s.shardMap[c].Close()
+	}
 }
 
 func NewByStateMachine(uint64, uint64) sm.IOnDiskStateMachine {
 
-	mkdirErr := os.MkdirAll(dir.DataPath(), os.ModePerm)
-	if mkdirErr != nil {
-		panic(mkdirErr)
-	}
-
-	mkSnapdirErr := os.MkdirAll(dir.SnapshotPath(), os.ModePerm)
-	if mkSnapdirErr != nil {
-		panic(mkSnapdirErr)
-	}
-
+	makeDirOrPanic(dir.IndexPath())
+	makeDirOrPanic(dir.BlockPath())
+	makeDirOrPanic(dir.SnapshotPath())
 
 	return &ByStateMachine{
-		store: NewStore(dir.DataPath()),
+		shardMap: ShardMap{},
 		logger: logger.New("statemachine"),
 	}
 }
+
+
+type searchMatch struct {
+	Score float64 `json:"score"`
+	Doc *document.Document `json:"doc"`
+}
+
+type searchResult struct {
+	Matches []*searchMatch `json:"matches"`
+}
+
+
+func (p *Shard) Search(part string, searchStr string) (*searchResult, error) {
+
+	query := bleve.NewQueryStringQuery(searchStr)
+
+	search := bleve.NewSearchRequest(query)
+	blSearchResults, err := p.Index.Search(search)
+	if err != nil {
+		return nil, err
+	}
+
+	res := searchResult{}
+
+	viewErr := p.Block.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(part))
+		if b == nil { return nil }
+
+		for _, hit := range(blSearchResults.Hits) {
+			match := searchMatch{ Doc:&document.Document{} }
+
+			match.Score = hit.Score
+
+			jsDoc := b.Get([]byte(hit.ID))
+			if jsDoc == nil {
+				//@TODO error here as index is incorrect
+				continue
+			}
+
+
+			jsErr := json.Unmarshal(jsDoc, match.Doc)
+			if jsErr != nil { return jsErr }
+
+			res.Matches = append(res.Matches, &match)
+		}
+
+		return nil
+	})
+
+	if viewErr != nil { return nil, viewErr }
+
+	return &res, nil
+}
+
+
+
+
+
+
+
 
 func (s *ByStateMachine) Lookup(q any) (any, error) {
 	raw := q.(string)
@@ -61,32 +209,31 @@ func (s *ByStateMachine) Lookup(q any) (any, error) {
 		Body: "server error",
 	}
 
+	shard, shardExists := s.shardMap[getFirstRune(cmd.Part)]
+
+	if ! shardExists {
+		return nil, errors.New("no such shard "+ cmd.Part)
+	}
+
 	switch cmd.Type {
 	case command.GET:
 
-		{
-			s.pendingMutex.RLock()
-			defer s.pendingMutex.RUnlock()
+		var raw []byte
+		getErr := shard.Block.View(func (tx *bolt.Tx) error {
+			// Get the bucket, if nil is returned then
+			// the bucket doesn't exist so just return
+			b := tx.Bucket([]byte(cmd.Part))
+			if b == nil { return nil }
 
-			// @TODO iterate through pending
-			for i := len(s.pending)-1 ; i >= 0; i-- {
-				pending := s.pending[i]
-				if cmd.Id == pending.Id && cmd.Part == pending.Part {
-					switch pending.Type {
-					case command.DEL:
-						res.Code = 404
-						res.Body = "not found"
-						return res, nil
-					case command.POST, command.PUT:
-						res.Code = 200
-						res.Body = cmd.StringDoc
-						return res, nil
-					}
-				}
-			}
-		}
+			// Get the raw bytes and copy them into the
+			// return buffer
+			doc := b.Get([]byte(cmd.Id))
+			raw = make([]byte, len(doc))
+			copy(raw, doc)
 
-		raw, getErr := s.store.GetRaw(cmd.Part, cmd.Id)
+			return nil
+		})
+
 		if getErr != nil { return nil, getErr }
 
 		if raw == nil || len(raw) == 0 {
@@ -98,9 +245,12 @@ func (s *ByStateMachine) Lookup(q any) (any, error) {
 		}
 
 	case command.SEARCH:
-		results, searchErr := s.store.Search(cmd.Part, cmd.Query)
+		results, searchErr := shard.Search(cmd.Part, cmd.Query)
 		if searchErr != nil { return res, searchErr }
 		jsResults, jsErr := json.Marshal(results)
+
+
+
 		if jsErr != nil { return res, jsErr }
 		res.Code = 200
 		res.Body = string(jsResults)
@@ -143,69 +293,158 @@ func (s *ByStateMachine) updateLastUpdateIndex() error {
 	})
 }
 
+
+type updateEntry struct {
+	Entry *sm.Entry
+	Cmd *command.Command
+	ExistingDoc *document.Document
+	ShardId rune
+}
+
 func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 	s.logger.Debug("in Update")
 
-	for ui, entry := range updates {
+	// First we parse the command strings into
+	// update structs
+	var updateEntries []*updateEntry
+	var updateIndex uint64 = s.lastIndex
+
+	for i, entry := range updates {
 		// Parse the command string into a cmd struct
 		cmd, jsErr := command.ParseCommand(string(entry.Cmd))
 		// It should havel already been validated so panic if
 		// there's an issue.
 		if jsErr != nil { panic(jsErr) }
 
-		var existingDoc *document.Document = nil
-
-		// See if we can find an existing document in
-		// the penging queue.
-		s.logger.Debug("searching in pending cmds")
-		s.pendingMutex.RLock()
-		for i := len(s.pending)-1 ; i >= 0; i-- {
-			pending := s.pending[i]
-			if cmd.Id == pending.Id && cmd.Part == pending.Part {
-				// There is a pending entry for this document
-				existingDoc = pending.Doc
-				break
-			}
-		}
-		s.pendingMutex.RUnlock()
-
-		// If no document is in the queue, search for one in
-		// state
-		if existingDoc == nil {
-			s.logger.Debug("searching in disk state")
-			doc, getErr := s.store.Get(cmd.Part, cmd.Id)
-			if getErr != nil {
-				return updates, getErr
-			}
-			existingDoc = doc
+		update := &updateEntry{
+			Entry: &updates[i],
+			Cmd: cmd,
+			ShardId: getFirstRune(cmd.Part),
 		}
 
-		switch cmd.Type {
-		case command.PUT, command.DEL:
-			if existingDoc == nil {
-				updates[ui].Result.Value = 404
-				continue
-			}
-			if existingDoc.Updated != cmd.Ts {
-				updates[ui].Result.Value = 409
-				continue
-			}
-		case command.POST:
-			if existingDoc != nil {
-				updates[ui].Result.Value = 409
-				continue
+		// Find the highest index
+		if entry.Index > updateIndex {
+			updateIndex = entry.Index
+		}
+
+		updateEntries = append(updateEntries, update)
+	}
+
+	// Then range through each shard
+	for c, shard := range s.shardMap {
+
+		// Find all entries that pertain to this shard
+		var shardEntries []*updateEntry
+		for _, entry := range updateEntries {
+			if entry.ShardId == c {
+				shardEntries = append(shardEntries, entry)
 			}
 		}
 
-		updates[ui].Result.Value = 200
+		// Skip if there are no shard entries
+		if len(shardEntries) == 0 {
+			continue
+		}
 
-		// The sync operation has to know about the applied index
-		// so set it here
-		cmd.Index = entry.Index
+		go func() {
 
-		s.pendingMutex.Lock()
-		s.pending = append(s.pending, cmd)
-		s.pendingMutex.Unlock()
+			// Start a block view transaction to find existing documents
+			shard.Block.View(func(tx *bolt.Tx) error {
+
+				for _, entry := range shardEntries {
+
+					bucket := tx.Bucket([]byte(entry.Cmd.Part))
+					if bucket == nil { continue }
+
+					rawDoc := bucket.Get([]byte(entry.Cmd.Id))
+
+					if len(rawDoc) == 0 {
+						continue
+					}
+
+					doc := document.Document{}
+					jsErr := json.Unmarshal(rawDoc, &doc)
+					entry.ExistingDoc = &doc
+
+					if jsErr != nil { return jsErr }
+				}
+
+				return nil
+			})
+
+			var validEntries []*updateEntry
+			// Now go back through and decide what to do with them all
+			for _, entry := range shardEntries {
+
+				switch entry.Cmd.Type {
+				case command.PUT, command.DEL:
+					if entry.ExistingDoc == nil {
+						entry.Entry.Result.Value = 404
+					} else if entry.ExistingDoc.Updated != entry.Cmd.Ts {
+						entry.Entry.Result.Value = 409
+					} else {
+						entry.Entry.Result.Value = 200
+						validEntries = append(validEntries, entry)
+					}
+				case command.POST:
+					if entry.ExistingDoc != nil {
+						entry.Entry.Result.Value = 409
+					} else {
+						entry.Entry.Result.Value = 200
+						validEntries = append(validEntries, entry)
+					}
+				}
+
+				s.logger.Debug("command ", entry.Cmd.Id, " = ", entry.Entry.Result.Value)
+			}
+
+
+			// Now we actually commit the valid entries
+
+			updateErr := shard.Block.Update(func(tx *bolt.Tx) error {
+				indexBatch := shard.Index.NewBatch()
+
+				for _, entry := range validEntries {
+					blockBucket, bucketErr := tx.CreateBucketIfNotExists([]byte(entry.Cmd.Part))
+					if bucketErr != nil { return bucketErr }
+
+					switch entry.Cmd.Type {
+					case command.PUT, command.POST:
+
+						s.logger.Debug("write", entry.Cmd.Id)
+
+						if err := blockBucket.Put([]byte(entry.Cmd.Id), entry.Cmd.BytesDoc); err != nil {
+							return err
+						}
+
+						if err := indexBatch.Index(entry.Cmd.Id, entry.Cmd.Doc); err != nil {
+							return err
+						}
+					case command.DEL:
+
+						s.logger.Debug("delete", entry.Cmd.Id)
+						
+						if err := blockBucket.Delete([]byte(entry.Cmd.Id)); err != nil {
+							return err
+						}
+
+						indexBatch.Delete(entry.Cmd.Id)
+					}
+				}
+
+				return shard.Index.Batch(indexBatch)
+			})
+
+			// Have to panic if the update fails
+			if updateErr != nil {
+				panic(updateErr)
+			}
+		}()
+	}
+
+	s.lastIndex = updateIndex
+	if err := s.updateLastUpdateIndex(); err != nil {
+		return updates, err
 	}
 
 	return updates, nil
@@ -213,6 +452,8 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 
 func (s *ByStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 	s.logger.Debug("in open")
+
+	s.OpenShardMap()
 
 	metaDb, boltErr := bolt.Open(dir.MetaDbPath(), 0600, nil)
 	if boltErr != nil {
@@ -233,8 +474,6 @@ func (s *ByStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 }
 
 func (s *ByStateMachine) PrepareSnapshot() (any, error) {
-	s.diskMutex.Lock()
-	defer s.diskMutex.Unlock()
 	lastUpdate, laErr := s.getLastUpdateIndex()
 	if laErr != nil { return nil, laErr }
 
@@ -253,11 +492,7 @@ func (s *ByStateMachine) PrepareSnapshot() (any, error) {
 }
 
 func (s *ByStateMachine) RecoverFromSnapshot(zip io.Reader, done <-chan struct{}) error {
-	s.diskMutex.Lock()
-	defer s.diskMutex.Unlock()
 	s.logger.Debug("recovering from snapshot")
-
-	s.store.CloseAllPartitions()
 
 	zipErr := zipper.Untar(dir.DataPath(), zip)
 	if zipErr != nil { return zipErr }
@@ -270,6 +505,7 @@ func (s *ByStateMachine) RecoverFromSnapshot(zip io.Reader, done <-chan struct{}
 
 func (s *ByStateMachine) SaveSnapshot(key any, writer io.Writer, done <-chan struct{}) error {
 	path := key.(string)
+	s.logger.Debug("saving snapshot ", path)
 	fd, err := os.Open(path)
 	if err != nil { return err }
 	_, copyErr := io.Copy(writer, fd)
@@ -277,53 +513,13 @@ func (s *ByStateMachine) SaveSnapshot(key any, writer io.Writer, done <-chan str
 }
 
 func (s *ByStateMachine) Sync() error {
-	s.logger.Debug("in sync")
-
-	if s.metaDb == nil { panic("metadb is closed") }
-
-	go func() {
-		s.diskMutex.Lock()
-		defer s.diskMutex.Unlock()
-
-		s.pendingMutex.RLock()
-		pending := s.pending
-		s.pendingMutex.RUnlock()
-
-		// Iterate through the pending interactions and write them
-		// to disk. We assume that they have already been validated.
-		for _, cmd := range pending {
-			switch cmd.Type {
-			case command.PUT, command.POST:
-				err := s.store.PutBytes(cmd.Doc, cmd.BytesDoc)
-				if err != nil { panic(err) }
-
-			case command.DEL:
-				err := s.store.Delete(cmd.Part, cmd.Id)
-				if err != nil { panic(err) }
-
-			default:
-				panic("unknown command in sync")
-			}
-
-			// The command contains the index as applied
-			s.lastIndex = cmd.Index
-		}
-
-		// Clear the pending queue
-		s.pendingMutex.Lock()
-		s.pending = s.pending[len(pending):]
-		s.pendingMutex.Unlock()
-
-		luiErr := s.updateLastUpdateIndex()
-		if luiErr != nil { panic(luiErr) }
-	}()
-
 	return nil
 }
 
 func (s *ByStateMachine) Close() error {
 	s.logger.Debug("in close")
 	err := s.metaDb.Close()
+	s.CloseShardMap()
 	s.metaDb = nil
 	return err
 }
