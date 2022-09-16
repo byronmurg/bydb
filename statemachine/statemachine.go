@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	//"sync"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
@@ -186,8 +187,6 @@ func (p *Shard) Search(part string, searchStr string) (*searchResult, error) {
 	return &res, nil
 }
 
-
-
 func (s *ByStateMachine) getPartitionShard(part string) *Shard {
 	firstRune := getFirstRune(part)
 	shard, shardExists := s.shardMap[firstRune]
@@ -198,7 +197,6 @@ func (s *ByStateMachine) getPartitionShard(part string) *Shard {
 
 	return shard
 }
-
 
 func (s *ByStateMachine) LookupGetRequestInState(cmd *command.Command) (*response.Response, error) {
 	shard := s.getPartitionShard(cmd.Part)
@@ -232,9 +230,8 @@ func (s *ByStateMachine) LookupGetRequestInState(cmd *command.Command) (*respons
 	}
 }
 
-
 func (s *ByStateMachine) LookupGetRequest(cmd *command.Command) (*response.Response, error) {
-	
+
 	existingCmd := s.findCommandInPending(cmd)
 
 	if existingCmd != nil {
@@ -478,6 +475,7 @@ func (s *ByStateMachine) Sync() error {
 		}
 	}
 
+	var wg sync.WaitGroup
 	// Then range through each shard
 	for c, shard := range s.shardMap {
 
@@ -494,48 +492,56 @@ func (s *ByStateMachine) Sync() error {
 			continue
 		}
 
-		// Now we actually commit the valid entries
-		updateErr := shard.Block.Update(func(tx *bolt.Tx) error {
-			indexBatch := shard.Index.NewBatch()
+		wg.Add(1)
 
-			for _, entry := range shardEntries {
-				blockBucket, bucketErr := tx.CreateBucketIfNotExists([]byte(entry.Cmd.Part))
-				if bucketErr != nil {
-					return bucketErr
+		go func(shardEntries []*updateEntry, shard *Shard) {
+			defer wg.Done()
+
+			// Now we actually commit the valid entries
+			updateErr := shard.Block.Update(func(tx *bolt.Tx) error {
+				indexBatch := shard.Index.NewBatch()
+
+				for _, entry := range shardEntries {
+					blockBucket, bucketErr := tx.CreateBucketIfNotExists([]byte(entry.Cmd.Part))
+					if bucketErr != nil {
+						return bucketErr
+					}
+
+					switch entry.Cmd.Type {
+					case command.PUT, command.POST:
+
+						s.logger.Debug("write ", entry.Cmd.Part, "->", entry.Cmd.Id)
+
+						if err := blockBucket.Put([]byte(entry.Cmd.Id), entry.Cmd.BytesDoc); err != nil {
+							return err
+						}
+
+						if err := indexBatch.Index(entry.Cmd.Id, entry.Cmd.Doc); err != nil {
+							return err
+						}
+					case command.DEL:
+
+						s.logger.Debug("delete ", entry.Cmd.Part, "->", entry.Cmd.Id)
+
+						if err := blockBucket.Delete([]byte(entry.Cmd.Id)); err != nil {
+							return err
+						}
+
+						indexBatch.Delete(entry.Cmd.Id)
+					}
 				}
 
-				switch entry.Cmd.Type {
-				case command.PUT, command.POST:
+				return shard.Index.Batch(indexBatch)
+			})
 
-					s.logger.Debug("write ", entry.Cmd.Part, "->", entry.Cmd.Id)
-
-					if err := blockBucket.Put([]byte(entry.Cmd.Id), entry.Cmd.BytesDoc); err != nil {
-						return err
-					}
-
-					if err := indexBatch.Index(entry.Cmd.Id, entry.Cmd.Doc); err != nil {
-						return err
-					}
-				case command.DEL:
-
-					s.logger.Debug("delete ", entry.Cmd.Part, "->", entry.Cmd.Id)
-
-					if err := blockBucket.Delete([]byte(entry.Cmd.Id)); err != nil {
-						return err
-					}
-
-					indexBatch.Delete(entry.Cmd.Id)
-				}
+			// Have to panic if the update fails
+			if updateErr != nil {
+				panic(updateErr)
 			}
-
-			return shard.Index.Batch(indexBatch)
-		})
-
-		// Have to panic if the update fails
-		if updateErr != nil {
-			panic(updateErr)
-		}
+		}(shardEntries, shard)
 	}
+
+	wg.Wait()
 
 	// clear the pending queue
 	s.pending = []*updateEntry{}

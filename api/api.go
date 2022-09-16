@@ -1,20 +1,19 @@
 package api
 
 import (
-	"net"
-	"time"
-	"fmt"
 	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/lni/dragonboat/v4"
 	"google.golang.org/grpc"
-	"encoding/json"
+	"net"
+	"time"
 
-	pb "omanom.com/bydb/proto"
 	"omanom.com/bydb/command"
-	. "omanom.com/bydb/response"
 	"omanom.com/bydb/logger"
+	pb "omanom.com/bydb/proto"
+	. "omanom.com/bydb/response"
 )
-
 
 func getHttpResponseString(code uint64) string {
 	switch code {
@@ -31,12 +30,11 @@ func getHttpResponseString(code uint64) string {
 	}
 }
 
-
 type Api struct {
-	pb.UnimplementedByDbServer	
-	raft *dragonboat.NodeHost
+	pb.UnimplementedByDbServer
+	raft    *dragonboat.NodeHost
 	shardId uint64
-	logger *logger.Logger
+	logger  *logger.Logger
 }
 
 func (s Api) Hello(ctx context.Context, grt *pb.Greeting) (*pb.Greeting, error) {
@@ -47,7 +45,7 @@ func (s Api) Hello(ctx context.Context, grt *pb.Greeting) (*pb.Greeting, error) 
 
 	cmdList, jsErr := json.Marshal(command.CommandFormats)
 
-	return &pb.Greeting{ Msg:msg, Commandlist:string(cmdList) }, jsErr
+	return &pb.Greeting{Msg: msg, Commandlist: string(cmdList)}, jsErr
 }
 
 func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
@@ -100,11 +98,11 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 		response.Code = res.Code
 		response.Document = res.Body
 
-
-
 	case command.JOIN_NODE:
 		membership, err := s.raft.SyncGetShardMembership(ctx, s.shardId)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 
 		var maxId uint64
 		for idx, _ := range membership.Nodes {
@@ -116,7 +114,7 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 		joinErr := s.raft.SyncRequestAddReplica(
 			ctx,
 			s.shardId,
-			maxId +1,
+			maxId+1,
 			cmd.Id,
 			membership.ConfigChangeID,
 		)
@@ -127,7 +125,6 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 
 		response.Code = 200
 		response.Document = "ok"
-
 
 	default:
 		response.Code = 405
@@ -143,7 +140,7 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 func (s Api) Start(address string) {
 	lis, err := net.Listen("tcp", address)
 	if err != nil {
-	  s.logger.Fatalf("failed to start api: %v", err)
+		s.logger.Fatalf("failed to start api: %v", err)
 	}
 	var opts []grpc.ServerOption
 	grpcServer := grpc.NewServer(opts...)
@@ -153,8 +150,8 @@ func (s Api) Start(address string) {
 
 func NewApi(nh *dragonboat.NodeHost) *Api {
 	return &Api{
-		raft: nh,
+		raft:    nh,
 		shardId: 128, //@TODO made up shardId
-		logger: logger.New("api"),
+		logger:  logger.New("api"),
 	}
 }

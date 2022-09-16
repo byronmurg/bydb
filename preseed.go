@@ -2,24 +2,25 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"flag"
-	"log"
-	"time"
-	"os"
+	"fmt"
 	"io/ioutil"
+	"log"
+	"os"
 	s "strings"
+	"time"
+
+	"math/rand"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "omanom.com/bydb/proto"
 )
 
-
 var (
 	nPartitions = flag.Int("partitions", 10, "number of partitions to preseed")
-	nWords = flag.Int("words", 10, "number of words to preseed")
-	nWorkers = flag.Int("workers", 10, "number of worker jobs to start")
+	nWords      = flag.Int("words", 10, "number of words to preseed")
+	nWorkers    = flag.Int("workers", 10, "number of worker jobs to start")
 
 	gaddresses = []string{
 		"localhost:64001",
@@ -29,7 +30,7 @@ var (
 )
 
 func callCrud(client pb.ByDbClient, msg string) *pb.Response {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 100)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*100)
 	defer cancel()
 	r, err := client.Crud(ctx, &pb.Command{Raw: msg})
 	if err != nil {
@@ -53,23 +54,26 @@ func loadWords() ([]string, error) {
 
 	words := s.Split(string(wordBytes), "\n")
 
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(words), func(i, j int) { words[i], words[j] = words[j], words[i] })
+
 	return words, nil
 }
 
 type TestResults struct {
 	MaxDuration int64
 	MinDuration int64
-	Duration time.Duration
+	Duration    time.Duration
 }
 
 type testFormatCbk = func(string, string) string
 
 type TestBatch struct {
-	nWorkers int
-	partitions []string
-	words []string
+	nWorkers      int
+	partitions    []string
+	words         []string
 	formatCommand testFormatCbk
-	servers []pb.ByDbClient
+	servers       []pb.ByDbClient
 }
 
 func (s *TestBatch) Run() *TestResults {
@@ -99,7 +103,7 @@ func (s *TestBatch) Run() *TestResults {
 		go func() {
 			for _, part := range s.partitions {
 				for _, word := range words {
-					
+
 					cmdStr := s.formatCommand(part, word)
 					res := callCrud(server, cmdStr)
 					if res.Code != 200 {
@@ -139,10 +143,8 @@ func (s *TestBatch) Run() *TestResults {
 	return &res
 }
 
-
-
 func createServerClient(connString string) pb.ByDbClient {
-	
+
 	// Set up a connection to the server.
 	conn, err := grpc.Dial(connString, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -163,7 +165,9 @@ func main() {
 	flag.Parse()
 
 	allWords, wordErr := loadWords()
-	if wordErr != nil { panic(wordErr) }
+	if wordErr != nil {
+		panic(wordErr)
+	}
 
 	words := allWords[0:*nWords]
 	partitions := allWords[0:*nPartitions]
@@ -184,10 +188,10 @@ func main() {
 		formatCommand: func(part string, word string) string {
 			return fmt.Sprintf(`POST { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ], "updated":%d, "created":%d }`, word, part, word, part, word, createTime, createTime)
 		},
-		words: words,
+		words:      words,
 		partitions: partitions,
-		nWorkers: *nWorkers,
-		servers: servers,
+		nWorkers:   *nWorkers,
+		servers:    servers,
 	}
 
 	fmt.Println("POST")
@@ -197,10 +201,10 @@ func main() {
 		formatCommand: func(part string, word string) string {
 			return fmt.Sprintf(`GET %s %s`, part, word)
 		},
-		words: words,
+		words:      words,
 		partitions: partitions,
-		nWorkers: *nWorkers,
-		servers: servers,
+		nWorkers:   *nWorkers,
+		servers:    servers,
 	}
 
 	fmt.Println("GET")
@@ -210,10 +214,10 @@ func main() {
 		formatCommand: func(part string, word string) string {
 			return fmt.Sprintf(`PUT %d { "id":"%s", "part":"%s", "index":{ "text":"%s" }, "block":{ "hide":"me" }, "categories":[ "%s=%s" ], "updated":%d, "created":%d }`, createTime, word, part, word, part, word, updateTime, updateTime)
 		},
-		words: words,
+		words:      words,
 		partitions: partitions,
-		nWorkers: *nWorkers,
-		servers: servers,
+		nWorkers:   *nWorkers,
+		servers:    servers,
 	}
 
 	fmt.Println("PUT")
@@ -223,10 +227,10 @@ func main() {
 		formatCommand: func(part string, word string) string {
 			return fmt.Sprintf(`DEL %s %s %d`, part, word, updateTime)
 		},
-		words: words,
+		words:      words,
 		partitions: partitions,
-		nWorkers: *nWorkers,
-		servers: servers,
+		nWorkers:   *nWorkers,
+		servers:    servers,
 	}
 
 	fmt.Println("DEL")

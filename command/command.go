@@ -1,11 +1,11 @@
 package command
 
 import (
-	s "strings"
-	"regexp"
-	"errors"
-	"strconv"
 	"encoding/json"
+	"errors"
+	"regexp"
+	"strconv"
+	s "strings"
 
 	. "omanom.com/bydb/document"
 )
@@ -26,20 +26,20 @@ const (
 type CommandParser = func(*Command, []string) (*Command, error)
 
 type CommandFormat struct {
-	Prefix string
+	Prefix       string
 	regexPattern *regexp.Regexp
-	Pattern string
-	parser CommandParser
+	Pattern      string
+	parser       CommandParser
 }
 
 func NewCommandFormat(prefix string, pattern string, parser CommandParser) *CommandFormat {
 	r := regexp.MustCompile(pattern)
 
 	return &CommandFormat{
-		Prefix: prefix,
+		Prefix:       prefix,
 		regexPattern: r,
-		Pattern: pattern,
-		parser: parser,
+		Pattern:      pattern,
+		parser:       parser,
 	}
 }
 
@@ -48,9 +48,9 @@ func (f *CommandFormat) Test(raw string) bool {
 }
 
 func (f *CommandFormat) Run(raw string) (*Command, error) {
-	
-	if ! f.regexPattern.MatchString(raw) {
-		return nil, errors.New("invalid format for command "+ f.Prefix)
+
+	if !f.regexPattern.MatchString(raw) {
+		return nil, errors.New("invalid format for command " + f.Prefix)
 	}
 
 	parts := f.regexPattern.FindStringSubmatch(raw)
@@ -62,11 +62,6 @@ func (f *CommandFormat) Run(raw string) (*Command, error) {
 
 	return f.parser(ret, parts)
 }
-
-
-
-
-
 
 var (
 	CommandFormats = []*CommandFormat{
@@ -100,7 +95,6 @@ var (
 			},
 		),
 
-
 		// PUT
 		NewCommandFormat(
 			"PUT",
@@ -110,7 +104,9 @@ var (
 				cmd.StringDoc = parts[2]
 				cmd.BytesDoc = []byte(cmd.StringDoc)
 				jsErr := json.Unmarshal(cmd.BytesDoc, &cmd.Doc)
-				if jsErr != nil { return nil, jsErr }
+				if jsErr != nil {
+					return nil, jsErr
+				}
 				cmd.Part = cmd.Doc.Part
 				cmd.Id = cmd.Doc.Id
 				ts, tsErr := strconv.ParseInt(parts[1], 10, 64)
@@ -131,7 +127,9 @@ var (
 				cmd.StringDoc = parts[1]
 				cmd.BytesDoc = []byte(cmd.StringDoc)
 				jsErr := json.Unmarshal(cmd.BytesDoc, &cmd.Doc)
-				if jsErr != nil { return nil, jsErr }
+				if jsErr != nil {
+					return nil, jsErr
+				}
 				cmd.Part = cmd.Doc.Part
 				cmd.Id = cmd.Doc.Id
 				cmd.Ts = cmd.Doc.Created //@TODO is this correct?
@@ -162,27 +160,24 @@ var (
 				return cmd, nil
 			},
 		),
-
 	}
 )
-
-
 
 var (
 	unknownCommandErr = errors.New("unknown command")
 )
 
 type Command struct {
-	Type CommandType
-	Doc *Document
-	Query string
-	Id string
-	Part string
-	Raw string
+	Type      CommandType
+	Doc       *Document
+	Query     string
+	Id        string
+	Part      string
+	Raw       string
 	StringDoc string
-	BytesDoc []byte
-	Index uint64
-	Ts int64
+	BytesDoc  []byte
+	Index     uint64
+	Ts        int64
 }
 
 func ParseCommand(rawMsg string) (*Command, error) {

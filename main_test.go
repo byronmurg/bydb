@@ -61,7 +61,6 @@ func TestCommandParse(t *testing.T) {
 			t.Fail()
 		}
 
-
 		if cmd.Type != PUT {
 			t.Log("command should be a POST")
 			t.Fail()
@@ -90,7 +89,6 @@ func TestCommandParse(t *testing.T) {
 			t.Fail()
 		}
 
-
 		if cmd.Type != POST {
 			t.Log("command should be a POST")
 			t.Fail()
@@ -118,7 +116,6 @@ func TestCommandParse(t *testing.T) {
 			t.Log("command should not be nil")
 			t.Fail()
 		}
-
 
 		if cmd.Type != SEARCH {
 			t.Log("command should be a SEARCH")

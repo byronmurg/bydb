@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"flag"
-	"log"
-	"time"
-	"regexp"
-	"errors"
 	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"regexp"
 	s "strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,12 +19,12 @@ import (
 )
 
 var (
-	addr = flag.String("addr", "localhost:64001", "the address to connect to")
+	addr                 = flag.String("addr", "localhost:64001", "the address to connect to")
 	client pb.ByDbClient = nil
 )
 
 func callCrud(msg string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second * 10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 	r, err := client.Crud(ctx, &pb.Command{Raw: msg})
 	if err != nil {
@@ -34,7 +34,7 @@ func callCrud(msg string) {
 }
 
 type CommandEntry struct {
-	Prefix string
+	Prefix  string
 	Pattern string
 }
 
@@ -59,7 +59,9 @@ func main() {
 
 	commands := []CommandEntry{}
 	commandJsErr := json.Unmarshal([]byte(r.GetCommandlist()), &commands)
-	if commandJsErr != nil { panic(commandJsErr) }
+	if commandJsErr != nil {
+		panic(commandJsErr)
+	}
 
 	validate := func(input string) error {
 		if s.ToLower(input) == "exit" {
@@ -69,8 +71,8 @@ func main() {
 		for _, cmd := range commands {
 			if s.HasPrefix(input, cmd.Prefix) {
 				r := regexp.MustCompile(cmd.Pattern)
-				if ! r.MatchString(input) {
-					return errors.New("invalid format for command "+ cmd.Prefix)
+				if !r.MatchString(input) {
+					return errors.New("invalid format for command " + cmd.Prefix)
 				} else {
 					return nil
 				}
@@ -81,7 +83,7 @@ func main() {
 	}
 
 	prompt := promptui.Prompt{
-		Label: "$",
+		Label:    "$",
 		Validate: validate,
 	}
 

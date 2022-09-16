@@ -14,9 +14,9 @@ func Test(prefix string) bool {
 }
 
 type Logger struct {
-	u *log.Logger
+	u      *log.Logger
 	prefix string
-	debug bool
+	debug  bool
 }
 
 func (s *Logger) Debug(p ...any) {
@@ -48,23 +48,22 @@ func (s *Logger) Fatalf(format string, p ...any) {
 }
 
 func (s *Logger) Extend(prefix string) *Logger {
-	newPrefix := s.prefix +"."+ prefix
+	newPrefix := s.prefix + "." + prefix
 	inDebug := Test(newPrefix)
 
 	return &Logger{
 		prefix: "",
-		u: log.New(s.u.Writer(), newPrefix+": ", s.u.Flags()),
-		debug: inDebug,
+		u:      log.New(s.u.Writer(), newPrefix+": ", s.u.Flags()),
+		debug:  inDebug,
 	}
 }
 
 var defaultLogger = &Logger{
 	prefix: "bydb",
-	u: log.New(def.Writer(), def.Prefix()+"bydb", def.Flags()),
-	debug: false,
+	u:      log.New(def.Writer(), def.Prefix()+"bydb", def.Flags()),
+	debug:  false,
 }
 
 func New(prefix string) *Logger {
 	return defaultLogger.Extend(prefix)
 }
-

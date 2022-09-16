@@ -5,16 +5,15 @@ import (
 	"os"
 
 	"encoding/json"
-	
 
 	"github.com/lni/dragonboat/v4"
 	raftconfig "github.com/lni/dragonboat/v4/config"
 	"github.com/lni/dragonboat/v4/logger"
 
-	"omanom.com/bydb/dir"
-	"omanom.com/bydb/config"
-	. "omanom.com/bydb/statemachine"
 	. "omanom.com/bydb/api"
+	"omanom.com/bydb/config"
+	"omanom.com/bydb/dir"
+	. "omanom.com/bydb/statemachine"
 )
 
 func enableDragonboatLogging() {
@@ -25,20 +24,24 @@ func enableDragonboatLogging() {
 }
 
 func isFirstRun() bool {
-    _, err := os.Stat(dir.DataPath())
-    return os.IsNotExist(err)
+	_, err := os.Stat(dir.DataPath())
+	return os.IsNotExist(err)
 }
 
 func Dump(input any) {
 	bytes, err := json.MarshalIndent(input, "", "  ")
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println(string(bytes))
 }
 
 func main() {
 
 	cnf, cfErr := config.LoadConfig()
-	if cfErr != nil { panic(cfErr) }
+	if cfErr != nil {
+		panic(cfErr)
+	}
 	Dump(cnf)
 
 	replicaID := cnf.ReplicaId
@@ -75,10 +78,10 @@ func main() {
 	enableDragonboatLogging()
 
 	/*
-	var nodeHostId string
-	if isInitNode != 0 {
-		nodeHostId = fmt.Sprintf("initNode-%d", *replicaID)
-	}
+		var nodeHostId string
+		if isInitNode != 0 {
+			nodeHostId = fmt.Sprintf("initNode-%d", *replicaID)
+		}
 	*/
 
 	rc := raftconfig.Config{
@@ -94,7 +97,7 @@ func main() {
 	datadir := dir.RaftPath()
 
 	nhc := raftconfig.NodeHostConfig{
-		WALDir:         datadir,
+		WALDir: datadir,
 		//NodeHostID:     nodeHostId,
 		NodeHostDir:    datadir,
 		RTTMillisecond: cnf.Raft.RTTMillisecond,
