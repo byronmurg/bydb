@@ -142,6 +142,9 @@ type searchResult struct {
 
 func (p *Shard) Search(part string, searchStr string) (*searchResult, error) {
 
+	// Make sure that we search in the part
+	searchStr = "+part:"+part+" "+searchStr
+
 	query := bleve.NewQueryStringQuery(searchStr)
 
 	search := bleve.NewSearchRequest(query)
@@ -212,7 +215,7 @@ func (s *ByStateMachine) LookupGetRequestInState(cmd *command.Command) (*respons
 
 		// Get the raw bytes and copy them into the
 		// return buffer
-		doc := b.Get([]byte(cmd.Id))
+		doc := b.Get([]byte(cmd.FullId()))
 		raw = make([]byte, len(doc))
 		copy(raw, doc)
 
@@ -412,7 +415,7 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 						continue
 					}
 
-					rawDoc := bucket.Get([]byte(entry.Cmd.Id))
+					rawDoc := bucket.Get([]byte(entry.Cmd.FullId()))
 
 					if len(rawDoc) == 0 {
 						continue
@@ -512,22 +515,22 @@ func (s *ByStateMachine) Sync() error {
 
 						s.logger.Debug("write ", entry.Cmd.Part, "->", entry.Cmd.Id)
 
-						if err := blockBucket.Put([]byte(entry.Cmd.Id), entry.Cmd.BytesDoc); err != nil {
+						if err := blockBucket.Put([]byte(entry.Cmd.FullId()), entry.Cmd.BytesDoc); err != nil {
 							return err
 						}
 
-						if err := indexBatch.Index(entry.Cmd.Id, entry.Cmd.Doc); err != nil {
+						if err := indexBatch.Index(entry.Cmd.FullId(), entry.Cmd.Doc); err != nil {
 							return err
 						}
 					case command.DEL:
 
 						s.logger.Debug("delete ", entry.Cmd.Part, "->", entry.Cmd.Id)
 
-						if err := blockBucket.Delete([]byte(entry.Cmd.Id)); err != nil {
+						if err := blockBucket.Delete([]byte(entry.Cmd.FullId())); err != nil {
 							return err
 						}
 
-						indexBatch.Delete(entry.Cmd.Id)
+						indexBatch.Delete(entry.Cmd.FullId())
 					}
 				}
 

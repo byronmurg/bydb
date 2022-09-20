@@ -1,5 +1,6 @@
 ## Features
 - Sharding
 - REMOVE_NODE
+- DELETE_PART
 - Auth
 - Admin command auth

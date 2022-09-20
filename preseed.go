@@ -21,6 +21,7 @@ var (
 	nPartitions = flag.Int("partitions", 10, "number of partitions to preseed")
 	nWords      = flag.Int("words", 10, "number of words to preseed")
 	nWorkers    = flag.Int("workers", 10, "number of worker jobs to start")
+	skipDelete  = flag.Bool("skipdelete", false, "don't clean up after tests")
 
 	gaddresses = []string{
 		"localhost:64001",
@@ -223,16 +224,19 @@ func main() {
 	fmt.Println("PUT")
 	PrintResults(putBatch.Run())
 
-	delBatch := TestBatch{
-		formatCommand: func(part string, word string) string {
-			return fmt.Sprintf(`DEL %s %s %d`, part, word, updateTime)
-		},
-		words:      words,
-		partitions: partitions,
-		nWorkers:   *nWorkers,
-		servers:    servers,
+	if ! *skipDelete {
+		delBatch := TestBatch{
+			formatCommand: func(part string, word string) string {
+				return fmt.Sprintf(`DEL %s %s %d`, part, word, updateTime)
+			},
+			words:      words,
+			partitions: partitions,
+			nWorkers:   *nWorkers,
+			servers:    servers,
+		}
+
+		fmt.Println("DEL")
+		PrintResults(delBatch.Run())
 	}
 
-	fmt.Println("DEL")
-	PrintResults(delBatch.Run())
 }

@@ -180,6 +180,10 @@ type Command struct {
 	Ts        int64
 }
 
+func (c *Command) FullId() string {
+	return c.Part +":"+ c.Id
+}
+
 func ParseCommand(rawMsg string) (*Command, error) {
 	for _, cmdFormat := range CommandFormats {
 		if cmdFormat.Test(rawMsg) {
