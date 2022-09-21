@@ -76,7 +76,7 @@ func (p *Shard) GetDocumentString(id, part string) (string, bool, error) {
 	}
 }
 
-func (p *Shard) PopulateUpdates(shardEntries []*updateEntry) error {
+func (p *Shard) FindExistingDocumentsForUpdates(shardEntries []*updateEntry) error {
 
 	// Start a block view transaction to find existing documents
 	return p.block.View(func(tx *bolt.Tx) error {
@@ -112,7 +112,7 @@ func (p *Shard) PopulateUpdates(shardEntries []*updateEntry) error {
 	})
 }
 
-func (p *Shard) RunUpdates(shardEntries []*updateEntry) {
+func (p *Shard) ApplyUpdates(shardEntries []*updateEntry) {
 	
 	// Now we actually commit the valid entries
 	updateErr := p.block.Update(func(tx *bolt.Tx) error {

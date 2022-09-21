@@ -275,7 +275,8 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 
 		// If there are no state search docs we can skip the view transaction
 		if stateSearchDocs > 0 {
-			popErr := shard.PopulateUpdates(shardEntries)
+			// Find any existing documents for these updates.
+			popErr := shard.FindExistingDocumentsForUpdates(shardEntries)
 			if popErr != nil {
 				return updates, popErr
 			}
@@ -346,7 +347,7 @@ func (s *ByStateMachine) Sync() error {
 
 		go func(shardEntries []*updateEntry, shard *Shard) {
 			defer wg.Done()
-			shard.RunUpdates(shardEntries)
+			shard.ApplyUpdates(shardEntries)
 		}(shardEntries, shard)
 	}
 
