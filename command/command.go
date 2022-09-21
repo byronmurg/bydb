@@ -21,6 +21,7 @@ const (
 
 	// Admin commands
 	JOIN_NODE
+	REMOVE_NODE
 )
 
 type CommandParser = func(*Command, []string) (*Command, error)
@@ -156,6 +157,17 @@ var (
 			`^JOIN_NODE (\S+)$`,
 			func(cmd *Command, parts []string) (*Command, error) {
 				cmd.Type = JOIN_NODE
+				cmd.Id = parts[1]
+				return cmd, nil
+			},
+		),
+
+		// REMOVE_NODE
+		NewCommandFormat(
+			"REMOVE_NODE",
+			`^REMOVE_NODE (\d+)$`,
+			func(cmd *Command, parts []string) (*Command, error) {
+				cmd.Type = REMOVE_NODE
 				cmd.Id = parts[1]
 				return cmd, nil
 			},

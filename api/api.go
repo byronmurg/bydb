@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strconv"
 	"encoding/json"
 	"fmt"
 	"github.com/lni/dragonboat/v4"
@@ -125,6 +126,34 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 
 		response.Code = 200
 		response.Document = "ok"
+
+	case command.REMOVE_NODE:
+
+		membership, err := s.raft.SyncGetShardMembership(ctx, s.shardId)
+		if err != nil {
+			return nil, err
+		}
+
+		nodeId, parseErr := strconv.ParseUint(cmd.Id, 10, 64)
+
+		if parseErr != nil {
+			return nil, parseErr
+		}
+
+		joinErr := s.raft.SyncRequestDeleteReplica(
+			ctx,
+			s.shardId,
+			nodeId,
+			membership.ConfigChangeID,
+		)
+
+		if joinErr != nil {
+			return nil, joinErr
+		}
+
+		response.Code = 200
+		response.Document = "ok"
+
 
 	default:
 		response.Code = 405
