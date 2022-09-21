@@ -9,10 +9,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/blevesearch/bleve/v2"
-	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
-	"github.com/blevesearch/bleve/v2/mapping"
-
 	"github.com/boltdb/bolt"
 	sm "github.com/lni/dragonboat/v4/statemachine"
 	"omanom.com/bydb/command"
@@ -24,16 +20,6 @@ import (
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-
-type Shard struct {
-	Index bleve.Index
-	Block *bolt.DB
-}
-
-func (s *Shard) Close() {
-	s.Index.Close()
-	s.Block.Close()
-}
 
 type ShardMap = map[rune]*Shard
 
@@ -60,56 +46,12 @@ func makeDirOrPanic(dir string) {
 	}
 }
 
-func createDefaultMapping() *mapping.IndexMappingImpl {
-	mapping := bleve.NewIndexMapping()
-
-	indexFieldMapping := bleve.NewDocumentMapping()
-
-	storeOnlyFieldMapping := bleve.NewTextFieldMapping()
-	storeOnlyFieldMapping.Analyzer = keyword.Name
-	storeOnlyFieldMapping.Store = true
-	storeOnlyFieldMapping.Index = true
-	storeOnlyFieldMapping.IncludeInAll = false
-	storeOnlyFieldMapping.IncludeTermVectors = false
-
-	documentMapping := bleve.NewDocumentStaticMapping()
-	documentMapping.AddSubDocumentMapping("index", indexFieldMapping)
-	documentMapping.AddFieldMappingsAt("categories", storeOnlyFieldMapping)
-
-	mapping.DefaultMapping = documentMapping
-
-	return mapping
-}
-
-func openOrCreateBleve(partitionPath string) (bleve.Index, error) {
-	_, err := os.Stat(partitionPath)
-
-	if os.IsNotExist(err) {
-		mapping := createDefaultMapping()
-		return bleve.New(partitionPath, mapping)
-	} else {
-		return bleve.Open(partitionPath)
-	}
-}
-
 func (s *ByStateMachine) OpenShardMap() {
 	for _, c := range alphabet {
-		blevePath := filepath.Join(dir.IndexPath(), string(c))
-		index, indexErr := openOrCreateBleve(blevePath)
-		if indexErr != nil {
-			panic(indexErr)
-		}
+		shard, err := OpenShard(string(c), s.logger)
 
-		boltPath := filepath.Join(dir.BlockPath(), string(c))
-		block, blockErr := bolt.Open(boltPath, 0600, nil)
-		if blockErr != nil {
-			panic(blockErr)
-		}
-
-		s.shardMap[c] = &Shard{
-			Index: index,
-			Block: block,
-		}
+		if err != nil { panic(err) }
+		s.shardMap[c] = shard
 	}
 }
 
@@ -140,55 +82,6 @@ type searchResult struct {
 	Matches []*searchMatch `json:"matches"`
 }
 
-func (p *Shard) Search(part string, searchStr string) (*searchResult, error) {
-
-	// Make sure that we search in the part
-	searchStr = "+part:"+part+" "+searchStr
-
-	query := bleve.NewQueryStringQuery(searchStr)
-
-	search := bleve.NewSearchRequest(query)
-	blSearchResults, err := p.Index.Search(search)
-	if err != nil {
-		return nil, err
-	}
-
-	res := searchResult{}
-
-	viewErr := p.Block.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(part))
-		if b == nil {
-			return nil
-		}
-
-		for _, hit := range blSearchResults.Hits {
-			match := searchMatch{Doc: &document.Document{}}
-
-			match.Score = hit.Score
-
-			jsDoc := b.Get([]byte(hit.ID))
-			if jsDoc == nil {
-				//@TODO error here as index is incorrect
-				continue
-			}
-
-			jsErr := json.Unmarshal(jsDoc, match.Doc)
-			if jsErr != nil {
-				return jsErr
-			}
-
-			res.Matches = append(res.Matches, &match)
-		}
-
-		return nil
-	})
-
-	if viewErr != nil {
-		return nil, viewErr
-	}
-
-	return &res, nil
-}
 
 func (s *ByStateMachine) getPartitionShard(part string) *Shard {
 	firstRune := getFirstRune(part)
@@ -204,32 +97,14 @@ func (s *ByStateMachine) getPartitionShard(part string) *Shard {
 func (s *ByStateMachine) LookupGetRequestInState(cmd *command.Command) (*response.Response, error) {
 	shard := s.getPartitionShard(cmd.Part)
 
-	var raw []byte
-	getErr := shard.Block.View(func(tx *bolt.Tx) error {
-		// Get the bucket, if nil is returned then
-		// the bucket doesn't exist so just return
-		b := tx.Bucket([]byte(cmd.Part))
-		if b == nil {
-			return nil
-		}
+	stringDoc, found, err := shard.GetDocumentString(cmd.FullId(), cmd.Part)
 
-		// Get the raw bytes and copy them into the
-		// return buffer
-		doc := b.Get([]byte(cmd.FullId()))
-		raw = make([]byte, len(doc))
-		copy(raw, doc)
-
-		return nil
-	})
-
-	if getErr != nil {
-		return nil, getErr
-	}
-
-	if raw == nil || len(raw) == 0 {
+	if err != nil {
+		return nil, err
+	} else if found == false {
 		return response.NotFound(), nil
 	} else {
-		return response.Success(string(raw)), nil
+		return response.Success(stringDoc), nil
 	}
 }
 
@@ -400,38 +275,10 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 
 		// If there are no state search docs we can skip the view transaction
 		if stateSearchDocs > 0 {
-			// Start a block view transaction to find existing documents
-			shard.Block.View(func(tx *bolt.Tx) error {
-
-				for _, entry := range shardEntries {
-
-					// If the doc was found in pending we can skip
-					if entry.ExistingDoc != nil {
-						continue
-					}
-
-					bucket := tx.Bucket([]byte(entry.Cmd.Part))
-					if bucket == nil {
-						continue
-					}
-
-					rawDoc := bucket.Get([]byte(entry.Cmd.FullId()))
-
-					if len(rawDoc) == 0 {
-						continue
-					}
-
-					doc := document.Document{}
-					jsErr := json.Unmarshal(rawDoc, &doc)
-					entry.ExistingDoc = &doc
-
-					if jsErr != nil {
-						return jsErr
-					}
-				}
-
-				return nil
-			})
+			popErr := shard.PopulateUpdates(shardEntries)
+			if popErr != nil {
+				return updates, popErr
+			}
 		}
 
 		// Now go back through and decide what to do with them all
@@ -499,48 +346,7 @@ func (s *ByStateMachine) Sync() error {
 
 		go func(shardEntries []*updateEntry, shard *Shard) {
 			defer wg.Done()
-
-			// Now we actually commit the valid entries
-			updateErr := shard.Block.Update(func(tx *bolt.Tx) error {
-				indexBatch := shard.Index.NewBatch()
-
-				for _, entry := range shardEntries {
-					blockBucket, bucketErr := tx.CreateBucketIfNotExists([]byte(entry.Cmd.Part))
-					if bucketErr != nil {
-						return bucketErr
-					}
-
-					switch entry.Cmd.Type {
-					case command.PUT, command.POST:
-
-						s.logger.Debug("write ", entry.Cmd.Part, "->", entry.Cmd.Id)
-
-						if err := blockBucket.Put([]byte(entry.Cmd.FullId()), entry.Cmd.BytesDoc); err != nil {
-							return err
-						}
-
-						if err := indexBatch.Index(entry.Cmd.FullId(), entry.Cmd.Doc); err != nil {
-							return err
-						}
-					case command.DEL:
-
-						s.logger.Debug("delete ", entry.Cmd.Part, "->", entry.Cmd.Id)
-
-						if err := blockBucket.Delete([]byte(entry.Cmd.FullId())); err != nil {
-							return err
-						}
-
-						indexBatch.Delete(entry.Cmd.FullId())
-					}
-				}
-
-				return shard.Index.Batch(indexBatch)
-			})
-
-			// Have to panic if the update fails
-			if updateErr != nil {
-				panic(updateErr)
-			}
+			shard.RunUpdates(shardEntries)
 		}(shardEntries, shard)
 	}
 
