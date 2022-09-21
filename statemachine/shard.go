@@ -27,13 +27,13 @@ func (s *Shard) Close() {
 
 
 func OpenShard(c string, l *logger.Logger) (*Shard, error) {
-	blevePath := filepath.Join(dir.IndexPath(), string(c))
+	blevePath := filepath.Join(dir.IndexPath(), c)
 	index, indexErr := openOrCreateBleve(blevePath)
 	if indexErr != nil {
 		return nil, indexErr
 	}
 
-	boltPath := filepath.Join(dir.BlockPath(), string(c))
+	boltPath := filepath.Join(dir.BlockPath(), c)
 	block, blockErr := bolt.Open(boltPath, 0600, nil)
 	if blockErr != nil {
 		return nil, blockErr
@@ -112,10 +112,10 @@ func (p *Shard) FindExistingDocumentsForUpdates(shardEntries []*updateEntry) err
 	})
 }
 
-func (p *Shard) ApplyUpdates(shardEntries []*updateEntry) {
+func (p *Shard) ApplyUpdates(shardEntries []*updateEntry) error {
 	
 	// Now we actually commit the valid entries
-	updateErr := p.block.Update(func(tx *bolt.Tx) error {
+	return p.block.Update(func(tx *bolt.Tx) error {
 		indexBatch := p.index.NewBatch()
 
 		for _, entry := range shardEntries {
@@ -150,11 +150,6 @@ func (p *Shard) ApplyUpdates(shardEntries []*updateEntry) {
 
 		return p.index.Batch(indexBatch)
 	})
-
-	// Have to panic if the update fails
-	if updateErr != nil {
-		panic(updateErr)
-	}
 }
 
 func (p *Shard) Search(part string, searchStr string) (*searchResult, error) {

@@ -46,16 +46,18 @@ func makeDirOrPanic(dir string) {
 	}
 }
 
-func (s *ByStateMachine) OpenShardMap() {
+func (s *ByStateMachine) openShardMap() error {
 	for _, c := range alphabet {
 		shard, err := OpenShard(string(c), s.logger)
 
-		if err != nil { panic(err) }
+		if err != nil { return err }
 		s.shardMap[c] = shard
 	}
+
+	return nil
 }
 
-func (s *ByStateMachine) CloseShardMap() {
+func (s *ByStateMachine) closeShardMap() {
 	for _, c := range alphabet {
 		s.shardMap[c].Close()
 	}
@@ -133,8 +135,8 @@ func (s *ByStateMachine) LookupSearchRequest(cmd *command.Command) (*response.Re
 	if searchErr != nil {
 		return nil, searchErr
 	}
-	jsResults, jsErr := json.Marshal(results)
 
+	jsResults, jsErr := json.Marshal(results)
 	if jsErr != nil {
 		return nil, jsErr
 	}
@@ -314,29 +316,44 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 	return updates, nil
 }
 
-func (s *ByStateMachine) Sync() error {
+func (s *ByStateMachine) getPendingUpdatesForShard(c rune) []*updateEntry {
+	// Find all entries that pertain to this shard
+	var shardEntries []*updateEntry
+	for _, entry := range s.pending {
+		if entry.ShardId == c {
+			shardEntries = append(shardEntries, entry)
+		}
+	}
+	return shardEntries
+}
 
-	s.logger.Debug("in sync")
+func (s *ByStateMachine) clearPendingQueue() {
+	s.pending = []*updateEntry{}
+}
 
-	// Find the highest index
+func (s ByStateMachine) findHighestIndexInPending() uint64 {
 	var updateIndex uint64 = s.lastIndex
 	for _, entry := range s.pending {
 		if entry.Index > updateIndex {
 			updateIndex = entry.Index
 		}
 	}
+	return updateIndex
+}
+
+func (s *ByStateMachine) Sync() error {
+
+	s.logger.Debug("in sync")
+
+	// Find the highest index
+	s.lastIndex = s.findHighestIndexInPending()
 
 	var wg sync.WaitGroup
 	// Then range through each shard
 	for c, shard := range s.shardMap {
 
 		// Find all entries that pertain to this shard
-		var shardEntries []*updateEntry
-		for _, entry := range s.pending {
-			if entry.ShardId == c {
-				shardEntries = append(shardEntries, entry)
-			}
-		}
+		shardEntries := s.getPendingUpdatesForShard(c)
 
 		// Skip if there are no shard entries
 		if len(shardEntries) == 0 {
@@ -347,39 +364,53 @@ func (s *ByStateMachine) Sync() error {
 
 		go func(shardEntries []*updateEntry, shard *Shard) {
 			defer wg.Done()
-			shard.ApplyUpdates(shardEntries)
+
+			applyErr := shard.ApplyUpdates(shardEntries)
+
+			if applyErr != nil {
+				panic(applyErr)
+			}
 		}(shardEntries, shard)
 	}
 
 	wg.Wait()
 
-	// clear the pending queue
-	s.pending = []*updateEntry{}
+	s.clearPendingQueue()
 
-	s.lastIndex = updateIndex
 	return s.updateLastUpdateIndex()
+}
+
+func (s *ByStateMachine) openMetaDb() error {
+	metaDb, boltErr := bolt.Open(dir.MetaDbPath(), 0600, nil)
+	if boltErr != nil {
+		return boltErr
+	}
+
+	s.metaDb = metaDb
+
+	return nil
+}
+
+func (s *ByStateMachine) ensureThatMetadbBucketExists() error {
+	return s.metaDb.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("meta"))
+		return err
+	})
 }
 
 func (s *ByStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 	s.logger.Debug("in open")
 
-	s.OpenShardMap()
-
-	metaDb, boltErr := bolt.Open(dir.MetaDbPath(), 0600, nil)
-	if boltErr != nil {
-		return 0, boltErr
+	if shardErr := s.openShardMap(); shardErr != nil {
+		return 0, shardErr
 	}
 
-	s.metaDb = metaDb
+	if metaErr := s.openMetaDb(); metaErr != nil {
+		return 0, metaErr
+	}
 
-	// Make sure that the metabucket is created
-	bucketCreateErr := metaDb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("meta"))
-		return err
-	})
-
-	if bucketCreateErr != nil {
-		return 0, bucketCreateErr
+	if err := s.ensureThatMetadbBucketExists(); err != nil {
+		return 0, err
 	}
 
 	return s.getLastUpdateIndex()
@@ -434,7 +465,7 @@ func (s *ByStateMachine) SaveSnapshot(key any, writer io.Writer, done <-chan str
 func (s *ByStateMachine) Close() error {
 	s.logger.Debug("in close")
 	err := s.metaDb.Close()
-	s.CloseShardMap()
+	s.closeShardMap()
 	s.metaDb = nil
 	return err
 }
