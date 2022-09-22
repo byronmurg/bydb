@@ -116,7 +116,7 @@ func (s *ByStateMachine) LookupGetRequest(cmd *command.Command) (*response.Respo
 
 	if existingCmd != nil {
 		switch existingCmd.Type {
-		case command.DEL:
+		case command.DEL, command.DELETE_PART:
 			return response.NotFound(), nil
 		case command.POST, command.PUT:
 			return response.Success(existingCmd.StringDoc), nil
@@ -205,6 +205,7 @@ type updateEntry struct {
 	Entry       *sm.Entry
 	Cmd         *command.Command
 	ExistingDoc *document.Document
+	PartExists  bool
 	Index       uint64
 	ShardId     rune
 }
@@ -213,7 +214,7 @@ func (s *ByStateMachine) findCommandInPending(cmd *command.Command) *command.Com
 
 	for i := len(s.pending) - 1; i >= 0; i-- {
 		pending := s.pending[i]
-		if cmd.Id == pending.Cmd.Id && cmd.Part == pending.Cmd.Part {
+		if (pending.Cmd.IsPart && cmd.Part == pending.Cmd.Part) || (cmd.Id == pending.Cmd.Id && cmd.Part == pending.Cmd.Part) {
 			return pending.Cmd
 		}
 	}
@@ -267,11 +268,25 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 		for _, entry := range shardEntries {
 			existingCmd := s.findCommandInPending(entry.Cmd)
 
-			if existingCmd != nil {
-				// There is a pending entry for this document
-				entry.ExistingDoc = existingCmd.Doc
-			} else {
+			if existingCmd == nil {
 				stateSearchDocs += 1
+			} else {
+				s.logger.Debug("command was found in pending")
+
+				switch existingCmd.Type {
+				case command.CREATE_PART:
+					entry.PartExists = true
+				case command.DELETE_PART:
+					entry.PartExists = false
+
+				default:
+					// We assume that the partition exists as there was a
+					// previous command that succeeded.
+					entry.PartExists = true
+
+					// There is a pending entry for this document
+					entry.ExistingDoc = existingCmd.Doc
+				}
 			}
 		}
 
@@ -289,7 +304,7 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 
 			switch entry.Cmd.Type {
 			case command.PUT, command.DEL:
-				if entry.ExistingDoc == nil {
+				if ! entry.PartExists || entry.ExistingDoc == nil {
 					entry.Entry.Result.Value = 404
 				} else if entry.ExistingDoc.Updated != entry.Cmd.Ts {
 					entry.Entry.Result.Value = 409
@@ -298,11 +313,28 @@ func (s *ByStateMachine) Update(updates []sm.Entry) ([]sm.Entry, error) {
 					s.pending = append(s.pending, entry)
 				}
 			case command.POST:
-				if entry.ExistingDoc != nil {
+				if ! entry.PartExists {
+					entry.Entry.Result.Value = 404
+				} else if entry.ExistingDoc != nil {
 					entry.Entry.Result.Value = 409
 				} else {
 					entry.Entry.Result.Value = 200
 					s.pending = append(s.pending, entry)
+				}
+			case command.CREATE_PART:
+				if entry.PartExists {
+					entry.Entry.Result.Value = 409
+				} else {
+					entry.Entry.Result.Value = 200
+					s.pending = append(s.pending, entry)
+				}
+
+			case command.DELETE_PART:
+				if entry.PartExists {
+					entry.Entry.Result.Value = 200
+					s.pending = append(s.pending, entry)
+				} else {
+					entry.Entry.Result.Value = 404
 				}
 			}
 

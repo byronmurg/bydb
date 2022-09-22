@@ -66,7 +66,7 @@ func (s Api) Crud(ctx context.Context, gCmd *pb.Command) (*pb.Response, error) {
 	cs := s.raft.GetNoOPSession(s.shardId)
 
 	switch cmd.Type {
-	case command.PUT, command.POST, command.DEL:
+	case command.PUT, command.POST, command.DEL, command.CREATE_PART, command.DELETE_PART:
 		s.logger.Debugf("crud is alter")
 		res, err := s.raft.SyncPropose(ctx, cs, []byte(gCmd.Raw))
 		if err != nil {

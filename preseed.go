@@ -22,6 +22,7 @@ var (
 	nWords      = flag.Int("words", 10, "number of words to preseed")
 	nWorkers    = flag.Int("workers", 10, "number of worker jobs to start")
 	skipDelete  = flag.Bool("skipdelete", false, "don't clean up after tests")
+	deletePart  = flag.Bool("deletepart", false, "only delete partitions")
 
 	gaddresses = []string{
 		"localhost:64001",
@@ -182,6 +183,15 @@ func main() {
 		servers = append(servers, server)
 	}
 
+	// Create the partiotions first
+	for _, part := range partitions {
+		r := callCrud(servers[0], "CREATE_PART "+ part)
+
+		if r.Code != 200 {
+			log.Fatalf("recieved code creating part: %d msg: %s", r.Code, r.Document)
+		}
+	}
+
 	createTime := time.Now().UnixMilli()
 	updateTime := time.Now().UnixMilli()
 
@@ -224,7 +234,7 @@ func main() {
 	fmt.Println("PUT")
 	PrintResults(putBatch.Run())
 
-	if ! *skipDelete {
+	if (! *skipDelete) && (! *deletePart) {
 		delBatch := TestBatch{
 			formatCommand: func(part string, word string) string {
 				return fmt.Sprintf(`DEL %s %s %d`, part, word, updateTime)
@@ -237,6 +247,33 @@ func main() {
 
 		fmt.Println("DEL")
 		PrintResults(delBatch.Run())
+	}
+
+	if ! *skipDelete {
+
+		/*
+		delPartBatch := TestBatch{
+			formatCommand: func(part string, word string) string {
+				return fmt.Sprintf(`DELETE_PART %s`, part)
+			},
+			words:      []string{"one"},
+			partitions: partitions,
+			nWorkers:   *nWorkers,
+			servers:    servers,
+		}
+
+		fmt.Println("DEL PART")
+		PrintResults(delPartBatch.Run())
+		*/
+
+		// Delete any partitions
+		for _, part := range partitions {
+			r := callCrud(servers[0], "DELETE_PART "+ part)
+
+			if r.Code != 200 {
+				log.Fatalf("recieved code deleting part: %d msg: %s", r.Code, r.Document)
+			}
+		}
 	}
 
 }

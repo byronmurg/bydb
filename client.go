@@ -68,8 +68,11 @@ func main() {
 			return nil
 		}
 
+		inputParts := s.Split(input, " ")
+		inputCommand := inputParts[0]
+
 		for _, cmd := range commands {
-			if s.HasPrefix(input, cmd.Prefix) {
+			if inputCommand == cmd.Prefix {
 				r := regexp.MustCompile(cmd.Pattern)
 				if !r.MatchString(input) {
 					return errors.New("invalid format for command " + cmd.Prefix)

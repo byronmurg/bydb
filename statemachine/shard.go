@@ -90,6 +90,15 @@ func (p *Shard) FindExistingDocumentsForUpdates(shardEntries []*updateEntry) err
 
 			bucket := tx.Bucket([]byte(entry.Cmd.Part))
 			if bucket == nil {
+				entry.PartExists = false
+				continue
+			} else {
+				entry.PartExists = true
+			}
+
+			// If the command is a part command then
+			// we already know everything that we need.
+			if entry.Cmd.IsPart {
 				continue
 			}
 
@@ -97,6 +106,8 @@ func (p *Shard) FindExistingDocumentsForUpdates(shardEntries []*updateEntry) err
 
 			if len(rawDoc) == 0 {
 				continue
+			} else {
+				entry.PartExists = true
 			}
 
 			doc := document.Document{}
@@ -119,12 +130,32 @@ func (p *Shard) ApplyUpdates(shardEntries []*updateEntry) error {
 		indexBatch := p.index.NewBatch()
 
 		for _, entry := range shardEntries {
-			blockBucket, bucketErr := tx.CreateBucketIfNotExists([]byte(entry.Cmd.Part))
-			if bucketErr != nil {
-				return bucketErr
+
+			bucketName := []byte(entry.Cmd.Part)
+
+			if entry.Cmd.Type == command.CREATE_PART {
+				p.logger.Debug("create bucket ", entry.Cmd.Part)
+				_, bucketErr := tx.CreateBucketIfNotExists(bucketName)
+				if bucketErr != nil {
+					return bucketErr
+				}
+				continue
 			}
 
+			blockBucket := tx.Bucket(bucketName)
+
 			switch entry.Cmd.Type {
+			case command.DELETE_PART:
+				p.logger.Debug("delete bucket ", entry.Cmd.Part)
+
+				c := blockBucket.Cursor()
+
+				for k, _ := c.First(); k != nil; k, _ = c.Next() {
+					indexBatch.Delete(string(k))
+				}
+
+				tx.DeleteBucket(bucketName)
+
 			case command.PUT, command.POST:
 
 				p.logger.Debug("write ", entry.Cmd.Part, "->", entry.Cmd.Id)

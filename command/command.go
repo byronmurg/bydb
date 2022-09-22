@@ -19,6 +19,9 @@ const (
 	POST
 	SEARCH
 
+	CREATE_PART
+	DELETE_PART
+
 	// Admin commands
 	JOIN_NODE
 	REMOVE_NODE
@@ -45,7 +48,7 @@ func NewCommandFormat(prefix string, pattern string, parser CommandParser) *Comm
 }
 
 func (f *CommandFormat) Test(raw string) bool {
-	return s.HasPrefix(raw, f.Prefix)
+	return s.HasPrefix(raw, f.Prefix+" ")
 }
 
 func (f *CommandFormat) Run(raw string) (*Command, error) {
@@ -151,6 +154,30 @@ var (
 			},
 		),
 
+		// CREATE_PART
+		NewCommandFormat(
+			"CREATE_PART",
+			`^CREATE_PART (\S+)$`,
+			func(cmd *Command, parts []string) (*Command, error) {
+				cmd.Type = CREATE_PART
+				cmd.Part = parts[1]
+				cmd.IsPart = true
+				return cmd, nil
+			},
+		),
+
+		// DELETE_PART
+		NewCommandFormat(
+			"DELETE_PART",
+			`^DELETE_PART (\S+)$`,
+			func(cmd *Command, parts []string) (*Command, error) {
+				cmd.Type = DELETE_PART
+				cmd.Part = parts[1]
+				cmd.IsPart = true
+				return cmd, nil
+			},
+		),
+
 		// JOIN_NODE
 		NewCommandFormat(
 			"JOIN_NODE",
@@ -190,6 +217,7 @@ type Command struct {
 	BytesDoc  []byte
 	Index     uint64
 	Ts        int64
+	IsPart    bool
 }
 
 func (c *Command) FullId() string {
