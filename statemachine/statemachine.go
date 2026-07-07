@@ -2,6 +2,7 @@ package statemachine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -85,19 +86,23 @@ type searchResult struct {
 }
 
 
-func (s *ByStateMachine) getPartitionShard(part string) *Shard {
+func (s *ByStateMachine) getPartitionShard(part string) (*Shard, error) {
 	firstRune := getFirstRune(part)
 	shard, shardExists := s.shardMap[firstRune]
+
 	// This is a panic as the shard should always exist
 	if !shardExists {
-		panic("no such shard " + part)
+		return nil, errors.New("No such shard "+part)
 	}
 
-	return shard
+	return shard, nil
 }
 
 func (s *ByStateMachine) LookupGetRequestInState(cmd *command.Command) (*response.Response, error) {
-	shard := s.getPartitionShard(cmd.Part)
+	shard, shardErr := s.getPartitionShard(cmd.Part)
+	if shardErr != nil {
+		return nil, shardErr
+	}
 
 	stringDoc, found, err := shard.GetDocumentString(cmd.FullId(), cmd.Part)
 
@@ -129,7 +134,10 @@ func (s *ByStateMachine) LookupGetRequest(cmd *command.Command) (*response.Respo
 }
 
 func (s *ByStateMachine) LookupSearchRequest(cmd *command.Command) (*response.Response, error) {
-	shard := s.getPartitionShard(cmd.Part)
+	shard, shardErr := s.getPartitionShard(cmd.Part)
+	if shardErr != nil {
+		return nil, shardErr
+	}
 
 	results, searchErr := shard.Search(cmd.Part, cmd.Query)
 	if searchErr != nil {
